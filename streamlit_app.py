@@ -442,6 +442,10 @@ def main() -> None:
       #MainMenu, header[data-testid="stHeader"], footer {visibility: hidden; height: 0;}
       .block-container {padding: 0 !important; max-width: 100% !important;}
       iframe {border: 0;}
+      /* the page re-runs quietly in the background: never dim it or show the "running" indicator */
+      [data-stale="true"], .stale-element, div[data-testid="stAppViewContainer"] * {transition: none !important;}
+      [data-stale="true"], .stale-element {opacity: 1 !important;}
+      [data-testid="stStatusWidget"], [data-testid="stToolbar"], [data-testid="stDecoration"] {display: none !important;}
     </style>""", unsafe_allow_html=True)
 
     load_env_file()
@@ -478,10 +482,11 @@ def main() -> None:
             if st.button("Retry connection"):
                 boot.clear()
                 st.rerun()
-        try:
-            st.caption(f"Documents: {store.counts()}")
-        except Exception:  # noqa: BLE001
-            pass
+        if st.button("Show document counts"):        # not on every run: each count is a database round trip
+            try:
+                st.caption(f"Documents: {store.counts()}")
+            except Exception as ex:  # noqa: BLE001
+                st.caption(f"Could not count: {ex.__class__.__name__}")
 
     if store_err:
         st.error(store_err)
