@@ -1,4 +1,4 @@
-"""OVR-VW PET Station: Streamlit + MongoDB (Atlas) in a single Python file.
+"""PAT (PET Automation Tool): Streamlit + MongoDB (Atlas) in a single Python file.
 
 The HTML app (web/pet_station.html) runs inside a bidirectional Streamlit component. Everything entered in it is
 sent to this process, written to MongoDB, and pushed to every other open screen. There is no separate API server.
@@ -29,6 +29,7 @@ from urllib.parse import quote_plus
 
 ROOT = pathlib.Path(__file__).resolve().parent
 SECRET_KEYS = ("MONGO_URI", "MONGODB_URI", "MONGODB_PASSWORD", "MONGO_PASSWORD", "MONGO_DB", "MONGODB_DB", "PET_APP_PASSWORD")
+BOOT_LIMIT = 3000                       # documents per collection sent with the first render
 MAX_ASSET_CHARS = 14_000_000            # ~10 MB file as a base64 data URL (a MongoDB document holds 16 MB)
 
 COLL_RE = re.compile(r"^[A-Za-z0-9_\-]{1,100}$")
@@ -169,6 +170,12 @@ class MemStore:
     def counts(self) -> Dict[str, int]:
         return {c: len(d) for c, d in self.docs.items()}
 
+    def snapshot(self) -> Dict[str, Any]:
+        """Everything saved so far, sent with the first page render so the dashboard fills instantly."""
+        with self.lock:
+            return {c: {"version": self.version(c), "docs": {i: {k: v for k, v in d.items() if k != "_updated"} for i, d in docs.items()}}
+                    for c, docs in self.docs.items()}
+
 
 class MongoStore(MemStore):
     """MongoDB / Atlas store. One MongoDB collection per app collection, plus `_meta` (change counters) and `_assets`."""
@@ -258,6 +265,18 @@ class MongoStore(MemStore):
     def counts(self):
         return {c: self.db[c].estimated_document_count() for c in self.db.list_collection_names() if not c.startswith("_")}
 
+    def snapshot(self):
+        vers = self.versions()                      # versions first: a newer document only causes one extra refresh
+        out = {}
+        for name in self.db.list_collection_names():
+            if name.startswith("_"):
+                continue
+            docs = {d["_id"]: {k: v for k, v in d.items() if k not in ("_id", "_updated")} for d in self.db[name].find({}).limit(BOOT_LIMIT)}
+            out[name] = {"version": int(vers.get(name, 0)), "docs": docs}
+            if len(docs) >= BOOT_LIMIT:
+                out[name]["partial"] = True         # too big to mirror: the browser asks the server for this one
+        return out
+
 
 def make_store() -> Tuple[MemStore, Optional[str]]:
     """Return (store, error). Falls back to MemStore when MongoDB cannot be reached."""
@@ -314,8 +333,8 @@ def execute(store: MemStore, op: str, a: Dict[str, Any]) -> Any:
         d = store.get(c, i)
         if d is None:
             return {"version": v, "id": i, "exists": False, "data": None}
-        upd = d.pop("_updated", None)
-        return {"version": v, "id": i, "exists": True, "data": d, "updated": upd}
+        d.pop("_updated", None)
+        return {"version": v, "id": i, "exists": True, "data": d}
     if op == "list":
         c = _coll(a.get("c"))
         ob = a.get("ob") or None
@@ -324,7 +343,7 @@ def execute(store: MemStore, op: str, a: Dict[str, Any]) -> Any:
         lim = max(0, min(int(a.get("lim") or 0), 5000)) or 1000
         v = store.version(c)
         rows = store.list(c, ob, a.get("dir") == "desc", lim)
-        items = [{"id": i, "data": {k: x for k, x in d.items() if k != "_updated"}, "updated": d.get("_updated")} for i, d in rows]
+        items = [{"id": i, "data": {k: x for k, x in d.items() if k != "_updated"}} for i, d in rows]
         return {"version": v, "count": len(items), "items": items}
     if op == "put":
         c, i = _coll(a.get("c")), _id(a.get("id"))
@@ -402,7 +421,12 @@ class Bridge:
             self.err = f"{ex.__class__.__name__}: {str(ex)[:200]}"
         base = {"now": now_ms(), "ok": self.err is None, "err": self.err, "store": self.store.kind, "vers": vers}
         if not msg:
-            return {**base, "synced": False, "res": {}}
+            boot = None
+            try:
+                boot = self.store.snapshot()
+            except Exception as ex:  # noqa: BLE001  the browser then simply asks for data the normal way
+                self.err = f"{ex.__class__.__name__}: {str(ex)[:200]}"
+            return {**base, "synced": False, "res": {}, "boot": boot}
         with self.lock:
             res = dict(self.done.get(str(msg.get("cid") or "?"), {}))
         return {**base, "synced": True, "res": res}
@@ -437,7 +461,7 @@ def main() -> None:
     import streamlit as st
     import streamlit.components.v1 as components
 
-    st.set_page_config(page_title="OVR-VW PET Station", page_icon="🛠️", layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(page_title="PAT (PET Automation Tool)", page_icon="🛠️", layout="wide", initial_sidebar_state="collapsed")
     st.markdown("""<style>
       #MainMenu, header[data-testid="stHeader"], footer {visibility: hidden; height: 0;}
       .block-container {padding: 0 !important; max-width: 100% !important;}
@@ -458,7 +482,7 @@ def main() -> None:
 
     app_password = os.environ.get("PET_APP_PASSWORD", "")
     if app_password and not st.session_state.get("pet_ok"):
-        st.markdown("### OVR-VW PET Station")
+        st.markdown("### PAT (PET Automation Tool)")
         pw = st.text_input("Password", type="password")
         if pw and hmac.compare_digest(pw, app_password):
             st.session_state["pet_ok"] = True
