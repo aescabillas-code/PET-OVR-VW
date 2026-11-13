@@ -1,0 +1,10 @@
+# Less background work on the server: no file watching (the app never edits itself) and no usage statistics.
+[server]
+fileWatcherType = "none"
+runOnSave = false
+
+[browser]
+gatherUsageStats = false
+
+[runner]
+fastReruns = true
