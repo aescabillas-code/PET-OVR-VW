@@ -69,6 +69,9 @@
     if (b && (VERS[a.c] || 0) !== b.version) return undefined;                  // the local copy is behind: ask the server (the copy is kept, changes are applied to it)
     if (!b) { if (VERS[a.c]) return undefined; b = { version: 0, docs: {} }; }
     if (b.partial) return undefined;
+    if (a.w) return undefined;                                                   // filtered reads (one case's history, a date range) go to the server
+    /* a copy of only the newest N (first load of the big, growing collections) answers only "newest first, up to N" */
+    if (b.top && (op === 'get' ? b.docs[a.id] === undefined : !(a.ob === b.top.ob && a.dir === 'desc' && a.lim && a.lim <= b.top.n))) return undefined;
     if (op === 'get') { var d = b.docs[a.id]; return { version: b.version, id: a.id, exists: d !== undefined, data: d === undefined ? null : JSON.parse(JSON.stringify(d)) }; }
     var items = Object.keys(b.docs).map(function (id) { return { id: id, data: JSON.parse(JSON.stringify(b.docs[id])) }; });
     if (a.ob) {
@@ -227,19 +230,20 @@
   }
   function colRef(path, q) {
     q = q || {}; var c = parseCol(path);
-    function args() { return { c: c, ob: q.ob || null, dir: q.dir || 'asc', lim: q.lim || 0 }; }
+    function args() { var r = { c: c, ob: q.ob || null, dir: q.dir || 'asc', lim: q.lim || 0 }; if (q.w && q.w.length) r.w = q.w; return r; }
     return {
       path: path,
       doc: function (id) { return docRef(path + '/' + (id || autoId())); },
-      orderBy: function (f, d) { return colRef(path, { ob: f, dir: d || 'asc', lim: q.lim }); },
-      limit: function (n) { return colRef(path, { ob: q.ob, dir: q.dir, lim: n }); },
+      orderBy: function (f, d) { return colRef(path, { ob: f, dir: d || 'asc', lim: q.lim, w: q.w }); },
+      limit: function (n) { return colRef(path, { ob: q.ob, dir: q.dir, lim: n, w: q.w }); },
+      where: function (f, op, v) { return colRef(path, { ob: q.ob, dir: q.dir, lim: q.lim, w: (q.w || []).concat([[f, op, v]]) }); },
       get: async function () { return querySnap((await rpc('list', args())).items); },
       add: async function (data) { var r = docRef(path + '/' + autoId()); await r.set(data); return r; },
       onSnapshot: function (cb, err) {
         return sub({ coll: c, cb: cb, err: err, fetch: async function () {
           var r = await rpc('list', args());
           /* a complete collection read from the server becomes the local copy again, so later changes arrive as small deltas */
-          try { if (BOOT_OK && r && r.items && (!BOOT[c] || BOOT[c].version < r.version) && (!q.lim || r.items.length < q.lim) && r.version) { var docs = {}; r.items.forEach(function (it) { docs[it.id] = it.data; }); BOOT[c] = { version: r.version, docs: docs }; } } catch (e) {}
+          try { if (BOOT_OK && !q.w && r && r.items && (!BOOT[c] || BOOT[c].version < r.version) && (!q.lim || r.items.length < q.lim) && r.version) { var docs = {}; r.items.forEach(function (it) { docs[it.id] = it.data; }); BOOT[c] = { version: r.version, docs: docs }; } } catch (e) {}
           return { version: r.version, sig: r.items, snap: function () { return querySnap(r.items); } };
         } });
       }
