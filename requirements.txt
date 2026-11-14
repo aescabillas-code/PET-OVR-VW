@@ -1,0 +1,4 @@
+streamlit>=1.37
+pymongo[srv]>=4.6
+certifi
+python-dotenv>=1.0
