@@ -33,6 +33,7 @@ from urllib.parse import quote_plus
 ROOT = pathlib.Path(__file__).resolve().parent
 SECRET_KEYS = ("MONGO_URI", "MONGODB_URI", "MONGODB_PASSWORD", "MONGO_PASSWORD", "MONGO_DB", "MONGODB_DB", "PET_APP_PASSWORD")
 BOOT_LIMIT = 3000                       # documents per collection sent with the first render
+BOOT_TOP = {"act": 1000, "cases": 1000}  # growing collections: only the newest N (by ts) go with the first render — what the page shows
 VERS_TTL = 2.0                          # seconds the change counters are served from memory before MongoDB is asked again
 READ_CACHE_MAX = 400                    # cached read results (each is dropped as soon as its collection changes)
 PUSH_MAX_DOCS = 1500                    # a changed collection up to this size is sent along with the change signal
@@ -174,6 +175,35 @@ def mongo_settings() -> Tuple[str, str, Optional[str]]:
 
 
 # ============================================================================= storage
+WHERE_OPS = {"==", ">=", "<=", ">", "<"}
+
+
+def _where(raw: Any) -> Optional[List[Tuple[str, str, Any]]]:
+    """Simple filters from the browser: [[field, op, value], ...] with == >= <= > < (e.g. one case's history)."""
+    if not raw:
+        return None
+    out = []
+    for w in raw if isinstance(raw, list) else []:
+        if not isinstance(w, (list, tuple)) or len(w) != 3 or w[1] not in WHERE_OPS or not FIELD_RE.match(str(w[0])):
+            raise ApiError("invalid_argument", "Invalid filter")
+        if not isinstance(w[2], (str, int, float, bool)) and w[2] is not None:
+            raise ApiError("invalid_argument", "Invalid filter value")
+        out.append((str(w[0]), w[1], w[2]))
+    return out[:5] or None
+
+
+def _match(d: Dict[str, Any], where: Optional[List[Any]]) -> bool:
+    for f, op, v in where or []:
+        x = d.get(f)
+        try:
+            if op == "==" and x != v or op == ">=" and not (x is not None and x >= v) or op == "<=" and not (x is not None and x <= v) \
+                    or op == ">" and not (x is not None and x > v) or op == "<" and not (x is not None and x < v):
+                return False
+        except TypeError:
+            return False
+    return True
+
+
 class MemStore:
     """Process-local store (lost on restart). Used only when MongoDB cannot be reached."""
 
@@ -252,9 +282,9 @@ class MemStore:
             if self.docs.get(c, {}).pop(i, None) is not None:
                 self._bump(c, i)
 
-    def list(self, c: str, order_by: Optional[str], desc: bool, limit: int) -> List[Tuple[str, Dict[str, Any]]]:
+    def list(self, c: str, order_by: Optional[str], desc: bool, limit: int, where: Optional[List[Any]] = None) -> List[Tuple[str, Dict[str, Any]]]:
         with self.lock:
-            rows = [(i, copy.deepcopy(d)) for i, d in self.docs.get(c, {}).items()]
+            rows = [(i, copy.deepcopy(d)) for i, d in self.docs.get(c, {}).items() if _match(d, where)]
         if order_by:
             def key(r):
                 v = r[1].get(order_by)
@@ -288,8 +318,16 @@ class MemStore:
     def snapshot(self) -> Dict[str, Any]:
         """Everything saved so far, sent with the first page render so the dashboard fills instantly."""
         with self.lock:
-            return {c: {"version": self.version(c), "docs": {i: {k: v for k, v in d.items() if k != "_updated"} for i, d in docs.items()}}
-                    for c, docs in self.docs.items()}
+            out = {}
+            for c, docs in self.docs.items():
+                items = list(docs.items())
+                top = BOOT_TOP.get(c)
+                if top and len(items) > top:
+                    items = sorted(items, key=lambda kv: (kv[1].get("ts") or 0) if isinstance(kv[1].get("ts"), (int, float)) else 0, reverse=True)[:top]
+                out[c] = {"version": self.version(c), "docs": {i: {k: v for k, v in d.items() if k != "_updated"} for i, d in items}}
+                if top and len(docs) > top:
+                    out[c]["top"] = {"ob": "ts", "n": top}
+            return out
 
 
     def snapshot_one(self, c: str) -> Dict[str, Any]:
@@ -498,11 +536,18 @@ class MongoStore(MemStore):
         if self._run(lambda: self.db[c].delete_one({"_id": i})).deleted_count:
             self._bump(c, i)
 
-    def list(self, c, order_by, desc, limit):
+    def list(self, c, order_by, desc, limit, where=None):
         from pymongo import ASCENDING, DESCENDING
+        q: Dict[str, Any] = {}
+        for f, op, v in where or []:
+            q.setdefault(f, {})["$" + {"==": "eq", ">=": "gte", "<=": "lte", ">": "gt", "<": "lt"}[op]] = v
 
         def load():
-            cur = self.db[c].find({})
+            for f, _, _ in where or []:
+                if (c, f) not in self._indexed:          # e.g. the case history: one index on "case" keeps it instant
+                    self.db[c].create_index(f)
+                    self._indexed.add((c, f))
+            cur = self.db[c].find(q)
             if order_by:
                 if (c, order_by) not in self._indexed:
                     self.db[c].create_index([(order_by, DESCENDING)])
@@ -511,7 +556,7 @@ class MongoStore(MemStore):
             if limit:
                 cur = cur.limit(limit)
             return [(d["_id"], {k: v for k, v in d.items() if k != "_id"}) for d in cur]
-        return [*self._cached(("list", c, order_by, bool(desc), int(limit or 0)), load)]
+        return [*self._cached(("list", c, order_by, bool(desc), int(limit or 0), repr(where or None)), load)]
 
     def asset_put(self, name, ctype, data):
         aid = uuid.uuid4().hex
@@ -554,10 +599,13 @@ class MongoStore(MemStore):
             for name in self.db.list_collection_names():
                 if name.startswith("_"):
                     continue
-                docs = {d["_id"]: {k: v for k, v in d.items() if k not in ("_id", "_updated")}
-                        for d in self.db[name].find({}).limit(BOOT_LIMIT)}
+                top = BOOT_TOP.get(name)
+                cur = self.db[name].find({}).sort("ts", -1).limit(top) if top else self.db[name].find({}).limit(BOOT_LIMIT)
+                docs = {d["_id"]: {k: v for k, v in d.items() if k not in ("_id", "_updated")} for d in cur}
                 out[name] = {"version": int(vers.get(name, 0)), "docs": docs}
-                if len(docs) >= BOOT_LIMIT:
+                if top and len(docs) >= top:
+                    out[name]["top"] = {"ob": "ts", "n": top}   # the newest N only: good for "newest first" views
+                elif len(docs) >= BOOT_LIMIT:
                     out[name]["partial"] = True     # too big to mirror: the browser asks the server for this one
             return out
         out = self._run(load)
@@ -631,9 +679,10 @@ def execute(store: MemStore, op: str, a: Dict[str, Any]) -> Any:
         ob = a.get("ob") or None
         if ob and not FIELD_RE.match(str(ob)):
             raise ApiError("invalid_argument", "Invalid orderBy field")
-        lim = max(0, min(int(a.get("lim") or 0), 5000)) or 1000
+        where = _where(a.get("w"))
+        lim = max(0, min(int(a.get("lim") or 0), 20000 if where else 5000)) or (10000 if where else 1000)
         v = store.version(c)
-        rows = store.list(c, ob, a.get("dir") == "desc", lim)
+        rows = store.list(c, ob, a.get("dir") == "desc", lim, where) if where else store.list(c, ob, a.get("dir") == "desc", lim)
         items = [{"id": i, "data": {k: x for k, x in d.items() if k != "_updated"}} for i, d in rows]
         return {"version": v, "count": len(items), "items": items}
     if op == "put":
@@ -795,6 +844,20 @@ def build_frontend() -> str:
     page = html.replace("<head>", "<head><script>" + shim.replace("</script", "<\\/script") + "</script>", 1)
     d = pathlib.Path(tempfile.gettempdir()) / "pet_station_component"
     d.mkdir(parents=True, exist_ok=True)
+    # Faster opening: the two built-in login pictures (about 0.75 MB of text inside the page) become separate image files
+    # next to the page. The page itself is then less than half the size, the pictures download in parallel and the browser
+    # keeps them in its cache; the phone picture is only fetched on a phone (lazy).
+    def _pull(m):
+        tag, mime, data = m.group(1), m.group(2), m.group(3)
+        idm = re.search(r'id="([\w-]+)"', tag)
+        name = (idm.group(1) if idm else "img") + "." + mime.split("/")[-1].split("+")[0]
+        raw = base64.b64decode(data)
+        fp = d / name
+        if not fp.exists() or fp.read_bytes() != raw:
+            fp.write_bytes(raw)
+        ver = hmac.new(b"v", raw, "sha1").hexdigest()[:10]
+        return f'{tag}loading="lazy" decoding="async" src="{name}?v={ver}"'
+    page = re.sub(r'(<img id="landing-img(?:-m)?"[^>]*?)src="data:(image/[a-z+]+);base64,([A-Za-z0-9+/=]+)"', _pull, page)
     f = d / "index.html"
     if not f.exists() or f.read_text(encoding="utf-8") != page:
         f.write_text(page, encoding="utf-8")

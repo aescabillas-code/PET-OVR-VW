@@ -407,3 +407,36 @@ balancing; cases of an agent who is Unavailable stay with them; cases are counte
   re-runs (requires Streamlit 1.37+, now in requirements.txt; older versions fall back to the full re-run). On screen, a
   dashboard section is rebuilt only when its content changed, and an open case only when that case changed — no flicker,
   open drop-downs stay open, animations don't restart. Measured with 120 cases: 60 fps, no long tasks, 1.3 ms per redraw.
+
+## Case History fix (Nov 14, evening)
+
+* Cause: the history of every case was taken from one shared activity list, of which only the newest 1,000 entries are
+  loaded. As the team logged more actions, older entries of a case fell out of that window and disappeared from its Case
+  History. Also, on a shared screen a new entry appeared only after the server echoed it back.
+* Fix: every entry is now also stored inside the case itself (newest 400 per case), and Case History shows both sources
+  merged without duplicates — a case keeps its full history however busy the team gets. New entries appear instantly.
+* Two owner changes were not written to the history at all; now they are: renaming a person on the shift schedule (their
+  cases follow the new name) and merging a duplicate name (e.g. Bonnylet → Bonylett Manalo).
+* Entries from earlier days show the date as well as the time.
+* Note: entries that had already dropped out of the 1,000-entry window before this fix cannot be shown again unless they
+  are still in the database's activity list; everything from now on is kept.
+
+## Every action in the case history, and faster opening (Nov 14, night)
+
+* **Case History** is complete again for every case: the complete history of a case is loaded from the database when the
+  case is opened (one quick filtered read, indexed), so entries older than the dashboard's newest-1,000 window show too —
+  including who added, completed, acknowledged or edited each checklist item (old items get the names from their history).
+  Reports load all history entries of the chosen period, so productivity and due misses count older cases correctly.
+* History is stored once (the activity list, kept forever) — the copy-inside-the-case approach from earlier today is
+  stopped so case documents don't grow and slow the app down (entries already stored that way are still shown).
+* Checklist items now also show **Edited by** (name and time) when their text was changed.
+* **Faster opening (browser and phone)**, measured on a phone with a slowed-down processor: about 2 s → 0.9 s until the
+  styled page shows, before even counting the downloads removed:
+  * Tailwind styles are pre-built into the page instead of being compiled in the browser at every start
+    (visually identical, checked screen by screen; `tools/tailwind_tokens.py` + `tools/tailwind_build.js` rebuild them).
+  * The two Excel libraries (~2 MB) no longer block the page: they load quietly a few seconds after start, or at once when
+    an upload / download needs them.
+  * The two login pictures (~0.75 MB of text inside the page) are served as separate image files, downloaded in parallel and
+    cached by the browser; the page is less than half the size.
+  * The first load sends only the newest 1,000 history entries and cases (what the page shows) instead of the oldest 3,000
+    history entries, which the page then had to replace.
