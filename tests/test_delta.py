@@ -47,3 +47,43 @@ class Delta(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HistoryAndFirstLoad(unittest.TestCase):
+    def test_one_case_history_by_filter(self):
+        s = app.MemStore()
+        for i in range(30):
+            s.put("act", f"a{i}", {"ts": i, "case": "C1" if i % 3 == 0 else "C2", "action": "x"})
+        r = app.execute(s, "list", {"c": "act", "ob": "ts", "dir": "desc", "w": [["case", "==", "C1"]]})
+        self.assertEqual(r["count"], 10)
+        self.assertTrue(all(it["data"]["case"] == "C1" for it in r["items"]))
+        r = app.execute(s, "list", {"c": "act", "w": [["ts", ">=", 25]]})
+        self.assertEqual(r["count"], 5)
+
+    def test_bad_filter_is_refused(self):
+        s = app.MemStore()
+        with self.assertRaises(app.ApiError):
+            app.execute(s, "list", {"c": "act", "w": [["case", "$where", "x"]]})
+
+    def test_first_load_sends_only_the_newest_activity(self):
+        s = app.MemStore()
+        for i in range(1500):
+            s.put("act", f"a{i}", {"ts": i})
+        snap = s.snapshot()["act"]
+        self.assertEqual(len(snap["docs"]), 1000)
+        self.assertEqual(snap["top"], {"ob": "ts", "n": 1000})
+        self.assertIn("a1499", snap["docs"])
+        self.assertNotIn("a0", snap["docs"])
+
+
+class FastOpening(unittest.TestCase):
+    def test_login_pictures_are_separate_cached_files_and_styles_are_prebuilt(self):
+        import pathlib
+        d = pathlib.Path(app.build_frontend())
+        page = (d / "index.html").read_text(encoding="utf-8")
+        self.assertTrue((d / "landing-img.webp").exists() and (d / "landing-img-m.webp").exists())
+        self.assertNotIn('id="landing-img" alt="PAT, Partner Engagement Team" draggable="false" src="data:', page)
+        self.assertLess(len(page), 800_000)
+        self.assertNotIn("cdn.tailwindcss.com", page)          # styles are pre-built, nothing compiles in the browser
+        self.assertIn('<style id="tw-static">', page)
+        self.assertNotIn('xlsx.full.min.js"></script>', page)  # Excel tools load only when needed

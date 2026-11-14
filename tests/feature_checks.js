@@ -1418,6 +1418,22 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('a schedule change does not move earlier records to the new region', A.run("regionAt('Rg Ann',__t1-86400000)") === 'APJ' && A.run("regionAt('Rg Ann',Date.now()+1000)") === 'EMEA');
     A.run("RGH={}");
   }
+  // ---------- Case History: nothing gets lost ----------
+  {
+    A.run("DBON=!!dbq;SIMON=false;ME={role:'manager',name:'Jeff Bote'};applyMe();window.__hc=mkCase('HX-1','Jeff Bote',{});REAL.cases.unshift(__hc);CASES=REAL.cases;cdSet('HX-1','model','DL380 Gen11')");
+    check('an action shows in Case History at once, before the server echoes it', A.run("getCase('HX-1').log.some(l=>l.action==='Model number updated'&&/DL380/.test(l.details))") === true);
+    check('the case document does not grow with history (kept once, in the activity list)', !(A.run("JSON.stringify(getCase('HX-1').hist||[])")||'').includes('Model number'));
+    await sleep(2500);
+    A.run("REAL.act=REAL.act.filter(e=>e.case!=='HX-1');Object.keys(LOCALLOG).forEach(k=>delete LOCALLOG[k]);rebuildLogs()");
+    check('(the dashboard window no longer has it)', A.run("getCase('HX-1').log.some(l=>l.action==='Model number updated')") === false);
+    A.run("openCaseModal('HX-1')"); await sleep(2500);
+    check('opening the case loads its complete history from the database, however old', A.run("getCase('HX-1').log.some(l=>l.action==='Model number updated'&&/DL380/.test(l.details))") === true);
+    A.run("REAL.act.unshift({...CASEHIST['HX-1'][0]});rebuildLogs()");
+    check('an entry found in both places is shown once', A.run("getCase('HX-1').log.filter(l=>l.action==='Model number updated').length") === 1);
+    A.run("closeCase()");
+    check('older entries show the date as well as the time', htmlSrc.includes('earlier days: date and time'));
+    A.run("REAL.cases=REAL.cases.filter(c=>c.id!=='HX-1');CASES=REAL.cases");
+  }
   // ---------- VM titles + New Year ----------
   {
     const lab = n => A.run(`ME={role:'manager',name:${JSON.stringify(n)}};meLabel()`);
