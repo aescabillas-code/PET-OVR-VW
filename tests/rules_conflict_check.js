@@ -72,7 +72,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     const isho=isHo(c),man=!!(c.credit&&c.credit.manTo===c.owner);
     __ra(c,to,why,by);
     if(c.owner===to&&fr!==to)__moves++;
-    if(ph.startsWith('bal:')&&c.owner===to){if(!isho)__V.push('I7 a new case '+c.id+' was moved by balancing');if(man)__V.push('I5b a hand-by-hand case '+c.id+' was moved');if(hoLoad(fr)<hoLoad(to))__V.push('I5 giver '+fr+' left below receiver '+to+' ('+hoLoad(fr)+'<'+hoLoad(to)+')')}
+    if((ph.startsWith('bal:')||ph==='lead')&&c.owner===to){if(!isho)__V.push('I7 a new case '+c.id+' was moved by balancing');if(man)__V.push('I5b a hand-by-hand case '+c.id+' was moved');if(hoLoad(fr)<hoLoad(to))__V.push('I5 giver '+fr+' left below receiver '+to+' ('+hoLoad(fr)+'<'+hoLoad(to)+')')}
   };`);
   const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
   const nowM = A.run('minOf(simNow())');
@@ -86,14 +86,14 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     staff['Near'] = ag('Near', -400, 10 + R(15));
     const push = () => A.run('STAFF=' + JSON.stringify(Object.values(staff)) + ';ensureMgrs(STAFF);STAFFLOADED=true');
     push();
-    A.run(`CASES.length=0;__PH='other';`);
+    A.run(`CASES.length=0;__PH='other';BALDONE={};AVAILIN={};`);
     // cases held by leaving agents and some hand-over cases already with agents
     lv.concat(['Near']).forEach(l => A.run(`for(let i=0;i<${R(35)};i++)CASES.push(mkCase('${l}-${scen}-'+i,'${l}',{}))`));
     Object.keys(staff).filter(k => k[0] === 'A').forEach(k => A.run(`for(let i=0;i<${R(8)};i++){const c=mkCase('${k}-${scen}-h'+i,'${k}',{});c.credit={n:'Old',at:Date.now()-36e5};c.xfer={from:'Old',to:'${k}',at:Date.now()-6e4};if(${R(6) === 0})c.credit.manTo='${k}',c.credit.manAt=Date.now();CASES.push(c)}for(let i=0;i<${R(3)};i++)CASES.push(mkCase('${k}-${scen}-n'+i,'${k}',{}))`));
     for (let s = 0; s < 8; s++) {
       steps++;
       const act = R(6), agents = Object.keys(staff).filter(k => k[0] === 'A');
-      if (act === 0) { const k = agents[R(agents.length)]; staff[k].status = staff[k].status === 'unavailable' ? 'available' : 'unavailable'; push(); }
+      if (act === 0) { const k = agents[R(agents.length)]; staff[k].status = staff[k].status === 'unavailable' ? 'available' : 'unavailable'; if (staff[k].status === 'available') staff[k].availAt = Date.now() + s; push(); }
       else if (act === 1) { A.run(`__PH='new';for(let i=0;i<${1 + R(4)};i++){const o=coverFor(simNow(),null,undefined,true)||(hasAgents()?QUEUE:'');const c=mkCase('N-${scen}-${s}-'+i,o||QUEUE,{nw:1});rrMark(c,o);CASES.unshift(c)}`); }
       else if (act === 2) { const l = lv[R(2)]; staff[l].end = T(nowM - 2); staff[l].start = T(nowM - 500); push(); }
       else if (act === 3) { const k = agents[R(agents.length)]; A.run(`CASES.filter(c=>c.owner==='${k}'&&!c.closed).slice(0,${R(5)}).forEach(c=>c.closed=true)`); }
@@ -102,6 +102,8 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
       A.run(`__batch={};__PH='eos';eosCheck();__PH='other';{const ks=(window.__batchOn||[]);if(Object.keys(__batch).length){const v=ks.map(k=>__batch[k]||0);if(Math.max(...v)-Math.min(...v)>1)__V.push('I4 an EOS batch was not split equally: '+JSON.stringify(__batch))}}`);
       // every agent's own catch-up check
       agents.forEach(k => A.run(`__PH='bal:${k}';ME={role:'agent',name:'${k}'};BAL_LAST_ST=(pers('${k}')||{}).status==='unavailable'?'':'unavailable';try{localStorage.setItem('pet_signed_in_at',String(Date.now()-60000));localStorage.removeItem('pat_bal_ok')}catch(e){}balanceCatchUp(true);__PH='other'`));
+      // the hand-over screen's balancing of agents who became available (Nov 15)
+      A.run(`__PH='lead';ME={role:'manager',name:'Jeff Bote'};balanceJoiners(true);__PH='other'`);
       // invariants after the step
       const bad = J(A.run(`JSON.stringify((()=>{const v=[],now=simNow(),on=onlineAgents(now);
         if(on.length){CASES.forEach(c=>{if(c.closed)return;if(c.owner===QUEUE)v.push('I2 queue case '+c.id+' left while agents are online');const p=pers(c.owner);if(p&&!isMgr(p)&&!onShiftAt(p,now)&&!(c.credit&&c.credit.manTo===c.owner))v.push('I2 '+c.id+' left with off-shift '+c.owner)})}
@@ -110,6 +112,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
       // stability: doing it again moves nothing
       const m0 = A.run('__moves'); A.run(`__PH='eos';eosCheck();__PH='other'`);
       agents.forEach(k => A.run(`__PH='bal:${k}';ME={role:'agent',name:'${k}'};BAL_LAST_ST='';try{localStorage.removeItem('pat_bal_ok')}catch(e){}balanceCatchUp(true);__PH='other'`));
+      A.run(`__PH='lead';ME={role:'manager',name:'Jeff Bote'};balanceJoiners(true);__PH='other'`);
       if (A.run('__moves') !== m0) A.run(`__V.push('I6 a second run moved '+(__moves-${m0})+' more case(s) in scenario ${scen} step ${s}')`);
     }
     totalMoves = A.run('__moves');

@@ -1350,6 +1350,38 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('the next check (30 s later) gives her the share once cases can move', H('Ck Kim') >= 5 && Math.abs(H('Ck Kim') - H('Ck Ann')) <= 2, ['Ck Ann', 'Ck Bo', 'Ck Kim'].map(H));
     check('once she holds her share the check rests (closing cases later does not pull in more)', (() => { A.run("CASES.filter(c=>c.owner==='Ck Kim'&&isHo(c)).forEach(c=>c.closed=true);balanceCatchUp(true)"); return H('Ck Kim') === 0; })());
   }
+  // ---------- Nov 15: balancing happens at once on the hand-over screen, near-EOS agents give first ----------
+  {
+    const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const nowM = A.run('minOf(simNow())');
+    const ag = (name, a, b, st) => ({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: st || 'available' });
+    const H = n => A.run(`hoOpen('${n}')`), L = n => A.run(`loadOf('${n}')`);
+    A.run('STAFF=' + JSON.stringify([ag('Nb Soon', -300, 180), ag('Nb Ann', -200, 400), ag('Nb Bo', -200, 400), ag('Nb Kim', 30, 500)]) + ';ensureMgrs(STAFF);STAFFLOADED=true;SIMON=false;BALDONE={};AVAILIN={}');
+    A.run("CASES.length=0;['Nb Soon','Nb Ann','Nb Bo'].forEach(n=>{for(let i=0;i<10;i++){const c=mkCase('NB-'+n.slice(3)+i,'Old',{});reassign(c,n,'end of shift hand-over');CASES.push(c)}});for(let i=0;i<8;i++)CASES.push(mkCase('NB-NEW'+i,'Nb Soon',{nw:1}))");
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();balanceJoiners(true)");
+    check('agents already sharing equally are left alone by the hand-over screen', H('Nb Soon') === 10 && H('Nb Ann') === 10 && H('Nb Bo') === 10 && L('Nb Kim') === 0);
+    A.run(`pers('Nb Kim').start=${JSON.stringify(T(nowM - 1))}`);
+    const mv = A.run('balanceJoiners(true)');
+    check('when an agent\'s shift starts she gets her share at once, without her own browser open (30 ÷ 4 = 7)', mv === 7 && H('Nb Kim') === 7, ['Nb Soon', 'Nb Ann', 'Nb Bo', 'Nb Kim'].map(H));
+    check('the agent ending in 3 hours gives first (down to the share), then the busiest', H('Nb Soon') === 7 && H('Nb Ann') === 8 && H('Nb Bo') === 8, ['Nb Soon', 'Nb Ann', 'Nb Bo'].map(H));
+    check('new cases still stay with the agent who received them', L('Nb Soon') === 15 && A.run("CASES.filter(c=>c.nw&&c.owner==='Nb Soon').length") === 8);
+    check('the move is logged as a plain line in Case History', A.run("CASES.some(c=>c.owner==='Nb Kim'&&(c.log||[]).some(l=>/Nb Kim became available: hand-over case moved from Nb Soon/.test(l.details||'')))") === true);
+    A.run("CASES.filter(c=>c.owner==='Nb Kim'&&isHo(c)).forEach(c=>c.closed=true)");
+    check('once she has her share the check rests (closing cases does not pull in more)', A.run('balanceJoiners(true)') === 0 && H('Nb Kim') === 0);
+    A.run("pers('Nb Kim').availAt=Date.now()+5");
+    A.run('balanceJoiners(true)');
+    check('back from Unavailable: balanced again straight away', H('Nb Kim') >= 4, ['Nb Soon', 'Nb Ann', 'Nb Bo', 'Nb Kim'].map(H));
+    A.run("AVAILIN['Nb Kim']=Date.now()+10;CASES.filter(c=>c.owner==='Nb Kim'&&isHo(c)).forEach(c=>c.closed=true)");
+    A.run('balanceJoiners(true)');
+    check('signing in on shift counts as becoming available too', H('Nb Kim') >= 4, ['Nb Soon', 'Nb Ann', 'Nb Bo', 'Nb Kim'].map(H));
+    check('an agent who stays signed in into her next shift is balanced again (new shift = new check)', A.run("(()=>{const p=pers('Nb Ann'),k=availKey(p,+simNow());return k!==availKey(p,+simNow()+86400000)})()") === true);
+    check('an agent near EOS (30 min) is never given cases by the hand-over screen', (() => { A.run(`STAFF.push(${JSON.stringify(ag('Nb Late', -400, 20))});BALDONE={}`); A.run('balanceJoiners(true)'); return L('Nb Late') === 0; })());
+    // the agent's own browser leaves it to the hand-over screen when another screen runs it (no double moves)
+    A.run("ME={role:'agent',name:'Nb Kim'};applyMe();localStorage.removeItem('pat_bal_ok');window.__db0=DBON;window.__g0=[GOT.cases,GOT.staff];DBON=true;GOT.cases=1;GOT.staff=1;LEASE={id:'other-screen',until:Date.now()+15000}");
+    const own = A.run('balanceCatchUp(true)');
+    A.run("DBON=__db0;GOT.cases=__g0[0];GOT.staff=__g0[1];LEASE={id:'',until:0};ME={role:'manager',name:'Jeff Bote'};applyMe()");
+    check('the agent\'s own browser does not move cases while another screen is balancing', own === 0);
+  }
   // ---------- idle sign-out rules + agent productivity & due-miss report ----------
   {
     A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();localStorage.setItem('pat_last_act',String(Date.now()-9*3600000))");
