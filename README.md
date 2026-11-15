@@ -440,3 +440,31 @@ balancing; cases of an agent who is Unavailable stay with them; cases are counte
     cached by the browser; the page is less than half the size.
   * The first load sends only the newest 1,000 history entries and cases (what the page shows) instead of the oldest 3,000
     history entries, which the page then had to replace.
+
+## Balancing fix: cases move as soon as an agent becomes available (Nov 15)
+
+Why cases were not moving to a newly available agent (rules that got in each other's way):
+
+* **Balancing ran only in the joining agent's own browser** (checklist rule "the check runs in the agent's own browser").
+  If her tab was closed, in the background or on a sleeping phone, nothing moved. Now the one screen that already runs the
+  automatic EOS hand-over also does balancing, every 5 seconds, for any agent who became available, whether or not her own
+  browser is open. Her own browser stays as a backup only when no other screen is running it (two screens moving cases at
+  the same time could give her twice her share).
+* **"Done" was remembered per sign-in**, so an agent who stayed signed in from one shift to the next was never balanced at
+  her next shift start. It is now remembered per availability: shift start, sign-in on shift, or back to Available. Each
+  one starts a fresh check; after she holds her share the check rests until the next one (unchanged rule). Done marks are
+  stored in `config/baldone`, so a screen taking over does not repeat them. Sign-ins are signalled with a small document per
+  agent (`avail/<name>`), not by rewriting the staff list.
+* **Agents ending their shift soon were not asked to give first**: cases were always taken from whoever held the most
+  hand-over cases. Now an agent whose shift ends within the next 4 hours gives first (soonest EOS first, only down to the
+  share, never below the receiver), then the busiest. Those cases would be handed over at their EOS anyway.
+* Back to Available now balances straight away (it used to wait for the next 30-second check).
+
+Unchanged on purpose (your checklist): new cases are not counted in the share and never moved by balancing, and cases a
+person transferred by hand stay put. So an agent with 2–4 hours left whose load is mostly **new** cases keeps those until
+her EOS, when all her open cases are handed over.
+
+Checked: new feature checks (shift start with no browser open, near-EOS agent gives first, new cases stay, rests after
+share, back from Unavailable, sign-in, next shift, own browser stays out while another screen balances) and the rule
+conflict fuzz now also runs the hand-over screen's balancing (60 scenarios, 0 violations, a second run moves nothing,
+also with the agents' own browsers switched off).
