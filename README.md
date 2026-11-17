@@ -674,3 +674,29 @@ script that is run once. They are not added to the app.
   covers the whole month. Dates can still be set by hand.
 * **Scorecard, productivity per active day vs the region average:** 100% or more = 5 (highest), 85–99% = 4,
   70–84% = 3, 55–69% = 2, under 55% = 1.
+
+## Fix: the schedule reverting and the app refreshing (Nov 17, late)
+
+What went wrong:
+* **Status saves rewrote the whole staff list.** A status change (the automatic EOS aux, Available / aux, idle
+  sign-in, coordinator on duty) wrote the whole staff list, including the shift schedule, from that screen's copy.
+* **Computer clocks decided which copy won.** A screen ignored a newer schedule if its own last save had a later time on
+  its computer's clock, so a screen with a clock a few minutes ahead kept the old schedule and kept writing it back.
+  The screen that runs the hand-over was also chosen by computer clocks, so two screens could both run it and write in
+  turn: the constant refreshing.
+* **Reloads replayed old saves.** After a reload, settings saves left over from the previous page (up to 10 minutes
+  old) were sent again.
+
+Fixes:
+* **Status saves:** `saveStatus` writes only the status fields onto the newest saved staff list (`STAFF_DOC`), so a
+  status change can never put back an older schedule. Only schedule edits by a manager or coordinator write the schedule.
+* **Accepting newer copies:** a newer staff list from another screen is always taken (no clock comparison). The
+  automatic region-history save runs at most every 10 minutes per screen.
+* **Server clock:** every screen uses the server's clock (`srvNow`, sent with every reply) for the hand-over lease and
+  for save times.
+* **No replays of settings:** settings saves (`config`, seats, sign-in marks) are never replayed after a reload. Other
+  saves are replayed for 2 minutes only.
+* **Frame height:** it is no longer recalculated on a timer (scrolling could change it and move the page). It is
+  worked out at start and on resize, and the same height is re-sent every 30 s.
+
+The schedule that was overwritten must be uploaded again once, after this update is live.

@@ -905,7 +905,7 @@ def main() -> None:
             st.error("Incorrect password")
         st.stop()
 
-    @st.cache_resource(show_spinner="Connecting to MongoDB…")
+    @st.cache_resource(show_spinner=False)             # no spinner above the app: it would move the app and reload it (white screen)
     def boot():
         store, err = make_store()
         return store, Bridge(store), err
@@ -929,10 +929,14 @@ def main() -> None:
             except Exception as ex:  # noqa: BLE001
                 st.caption(f"Could not count: {ex.__class__.__name__}")
 
+    # Steady page (Nov 17): Streamlit keeps the app's frame only while it stays at the same place on the page. A message that
+    # appears above it (an error, a spinner) moves it, and Streamlit then rebuilds the frame: a white screen and anything
+    # being typed is lost. The slot below is always there, so a message inside it never moves the app.
+    slot = st.container()
     if store_err:
-        st.error(store_err)
+        slot.error(store_err)
 
-    component = components.declare_component("pet_station", path=st.cache_resource(build_frontend)())
+    component = components.declare_component("pet_station", path=st.cache_resource(show_spinner=False)(build_frontend)())
 
     # Speed: the browser talks to the server about once a second. Inside a fragment, each of those messages re-runs only
     # this small part of the page (not the whole script, sidebar and styles), so answers come back faster and nothing on the
@@ -958,9 +962,18 @@ def _bridge_run(st, component, bridge: "Bridge", in_fragment: bool = True) -> No
                 st.session_state["last_msg"] = prev
     except Exception:  # noqa: BLE001
         pass
-    reply = bridge.reply(prev)
+    # Steady page (Nov 17): whatever goes wrong on the server, the app's frame is always drawn (an error here would replace
+    # the frame with an error box, and the browser would reload the app when it comes back).
+    try:
+        reply = bridge.reply(prev)
+    except Exception as ex:  # noqa: BLE001
+        reply = {"now": now_ms(), "ok": False, "err": f"{ex.__class__.__name__}", "store": getattr(bridge.store, "kind", "?"),
+                 "vers": None, "down": True, "synced": prev is not None, "res": {}}
     value = component(reply=reply, key="pet_station", default=None)
-    prev, rerun = absorb(bridge, prev, value, reply)
+    try:
+        prev, rerun = absorb(bridge, prev, value, reply)
+    except Exception:  # noqa: BLE001
+        rerun = False
     st.session_state["last_msg"] = prev
     if rerun:
         try:
