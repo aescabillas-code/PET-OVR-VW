@@ -493,3 +493,59 @@ also with the agents' own browsers switched off).
 
 One-time changes to data, like merging a person, profile or account, are done straight in the database with a separate
 script that is run once. They are not added to the app.
+
+## Productivity report: one row per agent, breakdown, guide, agent view (Nov 17, later)
+
+* **One row per agent, in the current region.** Counts that were split by a schedule change or a time-zone difference
+  are combined, and the agent is shown in their current region (today's schedule, else the last region remembered).
+  This replaces the Nov 14 rule that kept older records in the earlier region. The one-time region script for
+  Jovi Martinez is no longer needed.
+* **Productivity breakdown** (each count is 1 per case per day):
+  * New cases received: each new case counts 1 on the day it was received.
+  * Hand-over cases updated: hand-over cases the agent updated, 1 for each day they updated it.
+  * Own cases followed up: the agent's own new cases updated again on a later day.
+  * Other cases updated: a colleague's case the agent updated.
+
+  Productivity is the sum of these four. The full numbers table is grouped into
+  ① Received → ② Updated (follow-through) → ③ Productivity → ④ Due reminders, with a Total row. The dashboard table has
+  a Breakdown column ("6 new + 4 hand-over + 1 follow-up + 0 other").
+* **Guide:** "ⓘ Guide: what each column means" sits above the full numbers table and is the first sheet (Guide) of the
+  Excel file. The Excel file also has the breakdown columns.
+* **Agents see it in their profile:** Settings → **🏅 My productivity**. It is the same report, showing only their own
+  numbers, with their region's average per agent to compare. It has the same charts, due misses list, guide and Excel
+  download. Managers and coordinators keep the full Reports tab.
+
+## Scorecard and the New tag (Nov 17, later)
+
+* **Scorecard** (Reports → 🎯 Scorecard; agents see their own card at the top of Settings → 🏅 My productivity). Each
+  agent's score out of 100:
+
+  | Measure | Points | Full points when |
+  |---|---|---|
+  | Follow-through (cases updated ÷ received) | 30 | 80% or more |
+  | Due misses per case | 25 | 0.15 or less (no points at 0.5) |
+  | Average time to acknowledge | 10 | under 1 hour (no points at 8 hours) |
+  | Productivity per active day, compared with the region average | 25 | 90% of the average or more |
+  | Due reminders still unacknowledged | 10 | none (1 left = 5 points, 2 or more = 0) |
+
+  Status: On track 85+, Watch 70–84, Below target under 70. Agents with fewer than 8 cases in the period are not scored.
+  Each card shows the last 4 weeks of scores and the productivity breakdown. Managers and coordinators can add a context
+  note for the month (stored in `config/scnotes`), and the agent sees it on their card. Opening the Scorecard selects the
+  last 28 days. The Excel download has a Scorecard sheet.
+* **New tag:** only a case added with **+ Add** (or the bulk case upload) shows as New, for the agent it was added for.
+  A case that is handed over at end of shift, balanced or transferred loses the tag. Older moved cases that are still
+  flagged in the database are not shown as New either.
+
+## Bulk cases, developer access, automatic EOS aux (Nov 17, later)
+
+* **Bulk upload = old cases, never new.** Only a case added with **+ Add** is a new case. Cases loaded with the bulk upload
+  have the original owner "Bulk upload" (`BULK`). They are given to agents like hand-over cases (not by the round robin),
+  are never tagged New, and are not counted as "new received". An agent gets productivity for a bulk case when they
+  update it, the same as a hand-over case.
+* **Developer access:** on the password prompt of any profile, the Developer's own profile password also opens it (for
+  maintenance), with the note "Opened with developer access". The Developer needs a password set on her own profile.
+  Everyone else still needs that profile's password.
+* **Automatic aux EOS:** when an agent's shift ends, the screen that runs the hand-over sets them to Unavailable · EOS.
+  When their next shift starts it is set back to Available (only if it is still the automatic EOS), so they get cases
+  again as before. An agent who switches back to Available after EOS (overtime) is not set to EOS again for that shift.
+  EOS is not in the list of reasons an agent picks by hand.
