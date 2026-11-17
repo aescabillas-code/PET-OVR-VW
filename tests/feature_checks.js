@@ -1695,6 +1695,18 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('productivity per active day: 100% of the region average is the top rating (5), then 85% = 4, 70% = 3, 55% = 2', A.run("SCW.find(m=>m.k==='prod').b.join('|')") === '100% of the average or more|85–99%|70–84%|55–69%|under 55%' && A.run("band(1,[1,.85,.7,.55])") === 5 && A.run("band(.9,[1,.85,.7,.55])") === 4 && A.run("band(.6,[1,.85,.7,.55])") === 2 && A.run("band(.5,[1,.85,.7,.55])") === 1);
     A.run("RPT.view='weekly';rptWeek(0)");
   }
+  // ---------- Nov 17 (h): status changes never put back an older schedule; server clock ----------
+  {
+    A.run(`window.__wq=wq;wq=()=>{};window.__db0=DBON;DBON=true;STAFF=[{name:'Sv Amy',role:'Support',start:'06:00',end:'15:00',days:[1,1,1,1,1,1,1],status:'available',sch:['06:00-15:00','06:00-15:00','06:00-15:00','06:00-15:00','06:00-15:00','06:00-15:00','06:00-15:00']}];ensureMgrs(STAFF);
+      STAFF_DOC={list:[{name:'Sv Amy',role:'Support',start:'06:00',end:'15:00',days:[1,1,1,1,1,1,1],status:'available',sch:['OFF','14:00-23:00','14:00-23:00','14:00-23:00','14:00-23:00','14:00-23:00','OFF'],msch:{'2026-12-01':'14:00-23:00'}}],ts:1,rgh:{}};
+      const p=pers('Sv Amy');p.status='unavailable';p.reason='EOS';p.reasonAt=Date.now();saveStatus('Sv Amy')`);
+    const d = J(A.run('JSON.stringify(STAFF_DOC.list[0])'));
+    check('a status change (EOS, Available, aux) is written onto the newest saved schedule, never this screen\'s older copy', d.status === 'unavailable' && d.reason === 'EOS' && d.msch && d.msch['2026-12-01'] === '14:00-23:00' && d.sch[1] === '14:00-23:00', JSON.stringify(d));
+    A.run('wq=__wq;DBON=__db0');
+    check('the automatic EOS aux, availability, aux reasons, idle sign-in and coordinator on duty all save status only', (htmlSrc.match(/saveStatus\(/g) || []).length >= 6 && !/eosAux=e;chn\.push\(p\.name\);ch=true\}\}\);\nif\(ch\)\{if\(!SIMON\)saveStaff/.test(htmlSrc));
+    check('a newer schedule from another screen is never ignored because of a computer\'s clock', htmlSrc.includes("mine=!!STAFFT||STAFF_BUSY>0;if(Array.isArray(l)&&l.length)STAFF_DOC=dd;") && !htmlSrc.includes('(dd.ts||0)<STAFF_TS'));
+    check('the screen that runs the hand-over is chosen on the server\'s clock', htmlSrc.includes('function eosLeader(){if(SIMON||!DBON||!dbq||!MYID)return true;const now=srvNow();') && typeof A.run('srvNow()') === 'number');
+  }
   // ---------- Nov 14: closed cases, name merge, regions ----------
   {
     const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
