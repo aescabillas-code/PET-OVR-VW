@@ -82,6 +82,8 @@
     return { version: b.version, count: items.length, items: items };
   }
   /* outbox: unsaved changes survive a reload / a dropped connection and are sent again when the page is back */
+  /* the server's clock, for things several screens must agree on (who runs the hand-over, the order of schedule saves) */
+  var SKEW = null; window.__petNow = function () { return Math.round(Date.now() + (SKEW || 0)); };
   function obRead() { try { return JSON.parse(localStorage.getItem(OUTBOX) || '{}') || {}; } catch (e) { return {}; } }
   function obWrite(o) { try { if (Object.keys(o).length) localStorage.setItem(OUTBOX, JSON.stringify(o)); else localStorage.removeItem(OUTBOX); } catch (e) {} }
   function obAdd(p) { if (p.op === 'asset_put' || p.op === 'asset_del') return; var o = obRead(); o[p.ob] = { op: p.op, a: p.a, t: Date.now() }; obWrite(o); }
@@ -111,7 +113,8 @@
     var cur = obRead(); keys.forEach(function (k) { delete cur[k]; }); obWrite(cur);   // each one is re-added under this page while it is sent
     keys.forEach(function (k) {
       var e = o[k];
-      if (!e || !e.op || !WRITE_OPS[e.op] || now - (e.t || 0) > 10 * 60000) return;   // too old: newer data may exist
+      if (!e || !e.op || !WRITE_OPS[e.op] || now - (e.t || 0) > 2 * 60000) return;    // too old: newer data may exist
+      if (e.a && (e.a.c === 'config' || e.a.c === 'seat' || e.a.c === 'avail')) return;   // settings (the shift schedule, ...) are never replayed: a newer copy may have been saved since (Nov 17)
       rpc(e.op, e.a).then(function () { try { bump(e.a.c); } catch (x) {} }, function () {});
     });
   }
@@ -133,6 +136,7 @@
     if (!d || d.type !== 'streamlit:render') return;
     var r = (d.args || {}).reply || {};
     var first = !SYNC;
+    if (typeof r.now === 'number') { var sk = r.now - Date.now(); SKEW = SKEW == null ? sk : SKEW * 0.8 + sk * 0.2; }   // the server's clock (Nov 17)
     if (r.boot && !BOOT_OK) { BOOT = r.boot; BOOT_OK = true; }
     SYNC = true; AWAIT = 0; readyRes();
     STORE = r.store || STORE;
@@ -298,9 +302,16 @@
   };
 
   /* ---------- Streamlit frame + status badge ---------- */
-  function height() { var h = 700; try { var top = 0; try { top = Math.max(0, window.frameElement.getBoundingClientRect().top); } catch (e) {} h = Math.max(420, (window.parent.innerHeight || 800) - top - 8); } catch (e) {} send('streamlit:setFrameHeight', { height: h }); }
+  var lastH = 0;
+  function height(force) { var h = 700; try { var top = 0; try { top = Math.max(0, window.frameElement.getBoundingClientRect().top + (window.parent.scrollY || window.parent.pageYOffset || 0)); } catch (e) {}   /* position on the page, not on the screen: scrolling must not change the height (Nov 17) */ h = Math.max(420, (window.parent.innerHeight || 800) - top - 8); } catch (e) {} if (force === true || Math.abs(h - lastH) > 2) { lastH = h; send('streamlit:setFrameHeight', { height: h }); } }
   try { window.addEventListener('resize', height); } catch (e) {}
-  send('streamlit:componentReady', { apiVersion: 1 }); height();
+  send('streamlit:componentReady', { apiVersion: 1 }); height(true);
+  /* the page around the app can change (a message above it, the sidebar): keep the frame filling the window, and resend
+     it now and then in case Streamlit redrew the frame at another size (an almost empty screen) */
+  /* the height is worked out at start and when the window is resized (never while scrolling: that moved the page);
+     the same height is sent again now and then in case Streamlit redrew the frame at another size */
+  setInterval(function () { if (lastH) send('streamlit:setFrameHeight', { height: lastH }); }, 30000);
+  try { document.addEventListener('visibilitychange', function () { if (!document.hidden && lastH) send('streamlit:setFrameHeight', { height: lastH }); }); } catch (e) {}
 
   /* Status badge: silent while everything works (like the rest of the page, saves just happen).
    * It appears only when something needs attention, and its text never changes while it is shown. */
