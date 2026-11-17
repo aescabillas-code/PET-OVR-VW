@@ -324,8 +324,8 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   check('bulk upload creates exactly one reminder alarm', A.run("CASES.reduce((n,c)=>n+c.items.filter(i=>i.rem).length,0)")===1);
   check('bulk upload sends no assignment notification', A.run("NOTICEN")===0);
   check('bulk cases carry the account and case type', A.run("CASES.every(c=>c.account==='Account A'&&c.caseType==='aruba')"));
-  check('bulk cases count for the agent they were assigned to', A.run("CASES.every(c=>credOf(c).n===c.owner)"));
-  A.run("var __c=CASES[0],__o=__c.owner,__t=pool().find(p=>p.name!==__o).name;reassign(__c,__t,'test');");
+  check('bulk cases are old cases: given to the agent like hand-over cases, never tagged or counted as New', A.run("CASES.every(c=>credOf(c).n===BULK&&credsOf(c).some(x=>x.n===c.owner)&&!c.nw&&!isNew(c))"));
+  A.run("var __c=mkCase('TR-1',pool()[0].name,{nw:1});CASES.unshift(__c);var __o=__c.owner,__t=pool().find(p=>p.name!==__o).name;reassign(__c,__t,'test');");
   check('a transferred case stays in the first agent\'s daily count', A.run("credOf(CASES[0]).n")===A.run("__o")&&A.run("dayN(__o,simNow())")>=1);
 
   // ---------- statuses, same-case-number merge, daily trend ----------
@@ -1459,13 +1459,100 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run("RPT.view='perf';setTabTo('reports')");
     const rb = String(A.els['set-body'].innerHTML);
     check('the productivity table shows numbers (no bars), centred', !/<rect x="0" y="0" width="100" height="10"/.test(rb) && /class="py-1\.5 px-2 text-center font-bold text-sm">2</.test(rb));
-    check('the full numbers table is centred and has "Cases updated (1 per case per day)"', rb.includes('Cases updated (1 per case per day)') && /<td class="px-2 py-1\.5 border border-gray-200 text-center ">/.test(rb));
+    check('the full numbers table is centred and grouped: received, updated, productivity breakdown, due reminders', rb.includes('① Received in the period') && rb.includes('② Updated (follow-through)') && rb.includes('③ Productivity — 1 per case per day') && rb.includes('Own cases followed up') && /<td class="px-2 py-1\.5 border border-gray-200 text-center ">/.test(rb));
+    check('a guide explains every column', rb.includes('Guide: what each column means') && rb.includes('Several updates on one case in a day count as 1') && htmlSrc.includes("xlSheet(wb,sub,'Guide'"));
     check('graphs: productivity and due misses per day and per agent', rb.includes('Productivity and due misses per day') && rb.includes('Productivity and due misses per agent') && rb.includes('Due misses (right scale)'));
     check('the Excel download is wired to the lazy Excel library', htmlSrc.includes("'exportDaily','exportPerf'") && htmlSrc.includes('async function exportPerf()') && /pic\(ws1,perfDaySvg/.test(htmlSrc) && /pic\(ws2,perfAgentSvg/.test(htmlSrc));
     A.run("RPT.view='daily';setTabTo('reports')");
     const db = String(A.els['set-body'].innerHTML);
     check('Daily trend shows Variance instead of Net', db.includes('>Variance</th>') && !db.includes('>Net</th>') && htmlSrc.includes("'Variance (created − closed)'"));
     A.run("RPT.view='weekly'");
+  }
+  // ---------- Nov 17 (b): one row per agent in the current region, breakdown, agent's own view ----------
+  {
+    const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const nowM = A.run('minOf(simNow())');
+    A.run(`STAFF=[{name:'Jv Mar',role:'Support',start:'06:00',end:'15:00',days:[1,1,1,1,1,1,1],status:'available'},{name:'Jv Ann',role:'Support',start:'06:00',end:'15:00',days:[1,1,1,1,1,1,1],status:'available'},{name:'Jv Bo',role:'Support',start:'${T(nowM - 300)}',end:'${T(nowM + 300)}',days:[1,1,1,1,1,1,1],status:'available'}];STAFF.forEach(p=>p.sch=mkSch(p));ensureMgrs(STAFF);STAFFLOADED=true;SIMON=false;rptDays(7,true);RPT.account='all';RPT.type='all';
+      RGH={'Jv Mar':[{at:0,rg:'APJ'},{at:Date.now()-2*864e5,rg:'EMEA'},{at:Date.now()-864e5,rg:'APJ'}]};
+      CASES.length=0;(()=>{const n=Date.now(),D=864e5;
+        const a=mkCase('JV-1','Jv Mar',{});a.ts=n-1.5*D;a.credit={n:'Jv Mar',at:n-1.5*D};CASES.push(a);           // new case received while EMEA
+        const b=mkCase('JV-2','Jv Mar',{});b.ts=n-60000;b.credit={n:'Jv Mar',at:n-60000};CASES.push(b);              // new case received now (APJ)
+        const h=mkCase('JV-3','Jv Ann',{});h.ts=n-3*D;h.credit={n:'Jv Ann',at:n-3*D};h.credits=[{n:'Jv Mar',at:n-1.2*D}];h.owner='Jv Mar';h.wk={'Jv Mar':[n-1.1*D,n-30000]};CASES.push(h);   // hand-over, updated on 2 days
+        a.wk={'Jv Mar':[n-1.5*D+60000,n-20000]};                                                                     // own case followed up today
+        const o=mkCase('JV-4','Jv Bo',{});o.ts=n-6*D;o.credit={n:'Jv Bo',at:n-6*D};o.wk={'Jv Mar':[n-10000]};CASES.push(o)})()`);   // helping on a colleague's case
+    const R = J(A.run("JSON.stringify(perfData().rows.filter(r=>r.n==='Jv Mar').map(r=>({rg:r.rg,nw:r.nw,ho:r.ho,hoD:r.hoD,ownD:r.ownD,othD:r.othD,p:prodOf(r)})))"));
+    check('counts split by a schedule change are combined into one row', R.length === 1, JSON.stringify(R));
+    check('the row follows the agent\'s current region', R[0] && R[0].rg === 'APJ');
+    check('breakdown: 2 new received + 2 hand-over updates (2 days) + 1 own follow-up + 1 other = 6', R[0] && R[0].nw === 2 && R[0].hoD === 2 && R[0].ownD === 1 && R[0].othD === 1 && R[0].p === 6, JSON.stringify(R));
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();RPT.view='perf';setTabTo('reports')");
+    const mb = String(A.els['set-body'].innerHTML), mt = String(A.els['set-tabs'].innerHTML);
+    check('the dashboard table shows the breakdown next to productivity', mb.includes('<b>2</b> new</span> + <span class="nw"><b>2</b> hand-over</span> + <span class="nw"><b>1</b> follow-up</span> + <span class="nw"><b>1</b> other'));
+    check('managers keep the full Reports (no "My productivity" tab)', mt.includes('📊 Reports') && !mt.includes('My productivity'));
+    A.run("ME={role:'agent',name:'Jv Mar'};applyMe();setTabTo('reports')");
+    const ab = String(A.els['set-body'].innerHTML), at = String(A.els['set-tabs'].innerHTML);
+    check('an agent sees the report in their profile as "My productivity"', at.includes('🏅 My productivity') && !at.includes('📊 Reports') && (ab.includes('My productivity &amp; due misses') || ab.includes('My productivity & due misses')));
+    check('the agent sees only their own numbers, with the team average to compare', ab.includes('Jv Mar') && !ab.includes('Jv Ann</b>') && !ab.includes('Jv Bo</b>') && ab.includes('How you compare with the APJ team') && ab.includes('Guide: what each column means'));
+    check('changing the dates keeps the agent on their own view', (() => { A.run("rptDays(14)"); return A.run('setTab') === 'myperf' && A.run('PERF_ONLY') === ''; })());
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();RGH={};RPT.view='weekly'");
+  }
+  // ---------- Nov 17 (c): scorecard; New tag only for cases added with + Add ----------
+  {
+    const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const nowM = A.run('minOf(simNow())');
+    const ag = (name, a, b) => ({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: 'available' });
+    A.run('STAFF=' + JSON.stringify([ag('Sc Gone', -540, -2), ag('Sc Amy', -200, 300), ag('Sc Ben', -200, 300)]) + ';ensureMgrs(STAFF);STAFFLOADED=true;SIMON=false;RGH={}');
+    A.run("CASES.length=0;ME={role:'manager',name:'Jeff Bote'};applyMe();(()=>{const a=mkCase('NT-1','Sc Gone',{nw:1});CASES.push(a);const b=mkCase('NT-2','Sc Amy',{nw:1});CASES.push(b);const q=mkCase('NT-3','Sc Amy',{});CASES.push(q)})();eosCheck()");
+    check('a case added with + Add shows as New for the agent it was added for', A.run("isNew(getCase('NT-2'))") === true);
+    check('a new case handed over at end of shift does not show as New for the next agent', A.run("getCase('NT-1').owner") !== 'Sc Gone' && A.run("isNew(getCase('NT-1'))") === false && A.run("getCase('NT-1').nw") === false);
+    A.run("reassign(getCase('NT-2'),'Sc Ben','balancing')");
+    check('a balanced or transferred case does not show as New', A.run("isNew(getCase('NT-2'))") === false);
+    check('an older moved case still flagged in the database is not shown as New either', A.run("(()=>{const c=getCase('NT-3');c.nw=true;c.owner='Sc Ben';return isNew(c)})()") === false);
+    // scorecard
+    const S = r => J(A.run(`JSON.stringify(scRows({rows:[${JSON.stringify(r)}]}).map(x=>({s:x.score,p:x.pts})))`))[0];
+    const base = { n: 'X', rg: 'APJ', nw: 6, nwU: 6, ho: 4, hoU: 4, upd: 4, hoD: 4, ownD: 0, othD: 0, closed: 0, miss: 0, ackMs: 0, ackN: 0, maxMs: 0, open: 0, act: 5 };
+    check('scorecard: an agent meeting every target scores 100 (On track)', S(base).s === 100 && A.run('scSt(100).l') === 'On track');
+    check('scorecard: 50% follow-through loses part of the 30 points', S({ ...base, nwU: 3, hoU: 2 }).p.rate === 18.8);
+    check('scorecard: 3 due misses on 10 cases lose part of the 25 points; 2 left open lose all 10', S({ ...base, miss: 3 }).p.mpc < 25 && S({ ...base, open: 2 }).p.open === 0);
+    check('scorecard: fewer than 8 cases is not scored', S({ ...base, nw: 3, ho: 2, nwU: 3, hoU: 2 }).s === null && A.run('scSt(null).l') === 'Not scored');
+    check('scorecard status bands: 85+ On track, 70–84 Watch, under 70 Below target', A.run("[scSt(85).l,scSt(84).l,scSt(70).l,scSt(69).l].join()") === 'On track,Watch,Watch,Below target');
+    A.run("RPT.view='perf';rptView('score')");
+    const sb = String(A.els['set-body'].innerHTML);
+    check('Reports has a Scorecard view with cards per region, the guide and manager notes', sb.includes('🎯 Scorecard') && sb.includes('How the scorecard works') && sb.includes('Last 4 weeks') && sb.includes('Context note for') && sb.includes('/100'));
+    A.run("scNote('Sc Amy','On leave 3 days')");
+    A.run("ME={role:'agent',name:'Sc Amy'};applyMe();setTabTo('myperf')");
+    const ab = String(A.els['set-body'].innerHTML);
+    check('an agent sees their own scorecard (with the manager note) in My productivity', ab.includes('My scorecard') && ab.includes('Manager note:</b> On leave 3 days') && !ab.includes('Sc Ben</div>') && !ab.includes('Context note for'));
+    check('the Excel file has a Scorecard sheet', htmlSrc.includes("xlSheet(wb,sub,'Scorecard'"));
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();RPT.view='weekly'");
+  }
+  // ---------- Nov 17 (d): bulk cases are not new; developer access; automatic EOS aux ----------
+  {
+    const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const nowM = A.run('minOf(simNow())');
+    const ag = (name, a, b, st) => ({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: st || 'available' });
+    A.run('STAFF=' + JSON.stringify([ag('Ea Done', -540, -30), ag('Ea On', -200, 300), ag('Ea Back', -5, 400, 'unavailable'), ag('Ea Ot', -540, -60)]) + ";ensureMgrs(STAFF);STAFFLOADED=true;SIMON=false;pers('Ea Back').reason='EOS';CASES.length=0;RGH={}");
+    A.run("(()=>{const t0=Date.now(),c=mkCase('BK-1','Ea On',{});c.credit={n:BULK,at:t0};c.credits=[{n:'Ea On',at:t0}];CASES.push(c)})()");
+    check('a bulk-uploaded case is not counted as a new case received (Agent Status and the report)', A.run("dayParts('Ea On',simNow()).nw") === 0 && A.run("perfData().rows.find(r=>r.n==='Ea On').nw") === 0 && A.run("perfData().rows.find(r=>r.n==='Ea On').ho") === 1);
+    A.run("pers('Ea Ot').eosAux=lastEosAt(pers('Ea Ot'),+simNow())");   // already had EOS for this shift and went Available again (overtime)
+    A.run('eosAuxCheck()');
+    check('an agent whose shift ended is set to Unavailable · EOS automatically', A.run("pers('Ea Done').status") === 'unavailable' && A.run("auxLabel(pers('Ea Done'))") === 'EOS');
+    check('an agent still on shift is not touched', A.run("pers('Ea On').status") === 'available');
+    check('the automatic EOS is cleared back to Available when the next shift starts', A.run("pers('Ea Back').status") === 'available' && !!A.run("pers('Ea Back').availAt"));
+    check('an agent who set themselves Available after EOS (overtime) is not set back for that shift', A.run("pers('Ea Ot').status") === 'available');
+    check('EOS is not one of the reasons an agent picks by hand (it is automatic)', A.run("AUX_REASONS.includes('EOS')") === false);
+    check('the screen that runs the hand-over applies it', htmlSrc.includes('eosCheck();try{eosAuxCheck()}catch(e){}'));
+    // developer access: the Developer's password opens a password-protected profile
+    const hasCrypto = A.run("typeof lpCrypto==='function'&&!!lpCrypto()");
+    if (hasCrypto) {
+      await A.run("(async()=>{PROFILE_HASHES[profileKey('Arianne Escabillas')]=await hashProfilePassword('dev-pass-1');PROFILE_HASHES[profileKey('Ea On')]=await hashProfilePassword('agent-pass')})()");
+      A.run("ME={role:null,name:''};LP={v:'verify',name:'Ea On'};document.getElementById('lp-pw').value='dev-pass-1'");
+      await A.run('lpVerify()');
+      check('the Developer password opens any password-protected profile (maintenance)', A.run('ME.name') === 'Ea On');
+      A.run("ME={role:null,name:''};LP={v:'verify',name:'Ea On'};document.getElementById('lp-pw').value='wrong'");
+      await A.run('lpVerify()');
+      check('a wrong password still does not open it', A.run('ME.name') === '');
+    } else check('developer access code is present (no crypto in this test runner)', htmlSrc.includes('async function devKeyOk(v)') && htmlSrc.includes("if(await devKeyOk(v)){note('Opened with developer access')"));
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe()");
   }
   // ---------- Nov 14: closed cases, name merge, regions ----------
   {
