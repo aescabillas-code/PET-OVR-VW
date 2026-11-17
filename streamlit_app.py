@@ -20,6 +20,7 @@ import base64
 import collections
 import copy
 import hmac
+import json
 import os
 import pathlib
 import re
@@ -37,6 +38,9 @@ BOOT_TOP = {"act": 1000, "cases": 1000}  # growing collections: only the newest 
 VERS_TTL = 2.0                          # seconds the change counters are served from memory before MongoDB is asked again
 READ_CACHE_MAX = 400                    # cached read results (each is dropped as soon as its collection changes)
 PUSH_MAX_DOCS = 1500                    # a changed collection up to this size is sent along with the change signal
+PUSH_MAX_BYTES = 1_500_000              # ... and only if it is this small as JSON (big answers made slow connections drop)
+PUSH_TOTAL_BYTES = 3_000_000            # all collections sent along with one answer together
+DOWN_GRACE = 8.0                        # seconds MongoDB may be unreachable before the page is told (short hiccups stay silent)
 CHANGE_LOG = 2000                       # recent changes remembered per collection: browsers get only the changed documents
 MAX_ASSET_CHARS = 14_000_000            # ~10 MB file as a base64 data URL (a MongoDB document holds 16 MB)
 # Connection resilience: a dropped or briefly unreachable MongoDB connection is retried quietly instead of failing.
@@ -349,8 +353,8 @@ class MongoStore(MemStore):
         # Atlas closes them, bounded timeouts so nothing hangs, a small always-open pool so the first call never waits.
         opts: Dict[str, Any] = {}
         defaults = {"serverSelectionTimeoutMS": 5000, "connectTimeoutMS": 8000, "socketTimeoutMS": 30000,
-                    "maxIdleTimeMS": 60000, "retryWrites": True, "retryReads": True, "maxPoolSize": 20, "minPoolSize": 1,
-                    "heartbeatFrequencyMS": 10000, "waitQueueTimeoutMS": 10000, "appname": "pet-station"}
+                    "maxIdleTimeMS": 60000, "retryWrites": True, "retryReads": True, "maxPoolSize": 50, "minPoolSize": 1,
+                    "heartbeatFrequencyMS": 10000, "waitQueueTimeoutMS": 20000, "appname": "pet-station"}
         low = uri.lower()
         for k, v in defaults.items():                # options written in the connection string win
             if k.lower() + "=" not in low:
@@ -451,8 +455,13 @@ class MongoStore(MemStore):
                 if is_transient(ex):
                     self._fail(ex)
 
+    def is_down(self) -> bool:
+        """True once MongoDB has been unreachable for longer than DOWN_GRACE (a short hiccup is retried quietly)."""
+        ds = self.down_since
+        return ds is not None and time.monotonic() - ds > DOWN_GRACE
+
     def problem(self) -> Optional[str]:
-        if self.down_since is None:
+        if not self.is_down():
             return None
         return ("MongoDB is not answering right now — reconnecting automatically. Changes are kept in the browser and "
                 f"saved as soon as the connection is back. ({self.last_error or ''})")
@@ -733,6 +742,20 @@ class Bridge:
         self.have: Dict[str, Dict[str, int]] = {}       # cid -> {collection: version the browser holds}
         self.err: Optional[str] = None
         self.lock = threading.Lock()
+        self._sizes: Dict[Tuple[str, int], int] = {}     # (collection, version) -> JSON size of the whole collection
+
+    def _size(self, c: str, one: Dict[str, Any]) -> int:
+        key = (c, int(one.get("version") or 0))
+        n = self._sizes.get(key)
+        if n is None:
+            try:
+                n = len(json.dumps(one["docs"], default=str))
+            except Exception:  # noqa: BLE001
+                n = PUSH_MAX_BYTES + 1
+            if len(self._sizes) > 500:
+                self._sizes.clear()
+            self._sizes[key] = n
+        return n
 
     def handle(self, msg: Dict[str, Any]) -> None:
         cid = str(msg.get("cid") or "?")
@@ -770,7 +793,8 @@ class Bridge:
         except Exception as ex:  # noqa: BLE001  None: the browser keeps the counters it has (no refresh storm)
             vers = None
             self.err = f"{ex.__class__.__name__}: {str(ex)[:200]}"
-        down = getattr(self.store, "down_since", None) is not None
+        isd = getattr(self.store, "is_down", None)
+        down = bool(isd()) if callable(isd) else getattr(self.store, "down_since", None) is not None
         if not down and isinstance(self.err, str) and ("DbDown" in self.err or "AutoReconnect" in self.err):
             self.err = None                        # the connection is back: clear the old notice
         base = {"now": now_ms(), "ok": self.err is None and not down, "err": self.err, "store": self.store.kind,
@@ -793,6 +817,7 @@ class Bridge:
         # sent ("delta": one case instead of the whole collection). Otherwise the whole collection, as before.
         fresh: Dict[str, Any] = {}
         delta: Dict[str, Any] = {}
+        total = 0
         for c, v in (vers or {}).items():
             if c in have and int(have[c]) != int(v) and not str(c).startswith("_"):
                 hv, cv = int(have[c]), int(v)
@@ -817,7 +842,10 @@ class Bridge:
                 except Exception:  # noqa: BLE001  the browser then asks for it the normal way
                     continue
                 if len(one["docs"]) <= PUSH_MAX_DOCS:
-                    fresh[c] = one
+                    size = self._size(c, one)
+                    if size <= PUSH_MAX_BYTES and total + size <= PUSH_TOTAL_BYTES:
+                        fresh[c] = one
+                        total += size
         if fresh:
             out["fresh"] = fresh
         if delta:

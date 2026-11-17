@@ -700,3 +700,60 @@ Fixes:
   worked out at start and on resize, and the same height is re-sent every 30 s.
 
 The schedule that was overwritten must be uploaded again once, after this update is live.
+
+## Fix + new: zeros after a reload, database notices, COD aux, transfer several cases (Nov 18)
+
+- **No more counters dropping to 0.** The page keeps the last data it saw in the browser. When it reloads (Streamlit
+  reconnecting, a refresh), that copy is shown straight away and replaced by the server's copy as soon as it arrives.
+  While only the kept copy is shown, no screen moves cases on its own and staff/status saves wait for the server's
+  copy, so an older schedule is never written back. Counters show "…" while the first data is still loading.
+- **Fewer "disconnected" notices.** A MongoDB hiccup shorter than 8 seconds (`DOWN_GRACE`) is retried quietly and not
+  reported. The "Reconnecting" badge appears only when the problem lasts more than about 6 seconds. The connection pool
+  is larger (50, wait up to 20 s). Large collections are no longer sent along with every answer (over 1.5 MB per
+  collection, or 3 MB in total); the browser fetches them the normal way, so slow connections stop dropping.
+- **The coordinator on duty is set to Unavailable · COD automatically.** That stops every screen from giving them
+  cases, including screens still running older code. They can't switch themselves back to Available. When the duty
+  ends (or moves to someone else) they go back to Available.
+- **⇄ Transfer cases** (next to Add Case): tick several open cases (search and "Select all shown" help), pick a person
+  or "Next available agent", then Transfer. Managers and coordinators see all open cases; agents see only their own.
+  Closed cases never move. Each move is logged as "Transferred by … (several cases)".
+- Tests: `tests/shim_boot_cache.js` (new), Nov 18 block in `tests/feature_checks.js`, grace period and push cap in
+  `tests/test_reconnect.py`.
+
+## Fix: background refreshes never disturb typing; everything typed is saved (Nov 18, later)
+
+- **Refreshes stay in the background.** The dashboard redraws every second, and the open case and Settings redraw when
+  another screen saves. Those redraws now keep whatever is being typed: the text, the cursor position and the focus stay
+  as they were (`withKeep` around `render`, `renderCase` and `setTabTo`). A field is only reset after the person submits
+  it (Enter, or a button).
+- **Conflicts found and fixed.** The 1-second timer, the case-change listener and the Settings listeners each redrew
+  the screen on their own rules, and some of them threw away fields that were being typed in. All of them now go
+  through the same keep-what-is-typed step.
+- Test: `tests/typing_keep.js` (real browser).
+
+## Case details save exactly as before (Nov 18, latest)
+
+- The original saving behaviour of the case details is back, unchanged:
+  - a case field saves when you leave it;
+  - checklist items, work/part orders, the maintenance window and the revisit save with their buttons (Add, Set, Save…).
+- Removed: the 2-second autosave while typing, saving on tab leave, and the save-on-close of unfinished entries
+  (Nov 18), including their `dft` case field.
+- Kept: background redraws don't wipe what is being typed, and the draft keeper (Nov 17) still puts back typing after a
+  page reload.
+- Fixed: an open case no longer keeps showing an old value after a save from another screen, or after the page's
+  kept copy is replaced by the server's. Only fields being typed in are kept over a redraw.
+- The browser's kept copy is refreshed every 4 seconds (was 15) after a change, so it is closer to the latest saves.
+- Test: `tests/typing_keep.js` updated; `tests/autosave_close.js` removed.
+
+## Nothing typed in a case is lost; saving happens in the background (Nov 18, 01:20)
+
+- **Case fields save while you type.** Store number, model number, RITM, case number and SFDC IDs are saved quietly
+  half a second after the last key. The history line ("Model number updated") is still written once, when the field is
+  left, as before. Account, status and severity lists save when picked, as before.
+- **Closing a case by accident, or opening another case from an alert, keeps what was typed.** Entries still waiting
+  for their button (new checklist item, work/part order Task ID/label, maintenance window dates, revisit) are kept with
+  the case (case field `dft`, saved in the database). They are shown again when the case is opened, on any screen.
+  Nothing is added until its button is pressed, and once it is, that kept entry is cleared. All buttons are unchanged.
+- **Nothing visible.** No message, redraw or waiting while saving. The "Reconnecting" badge appears only if a
+  database outage lasts more than 45 seconds. Unsaved changes are kept and sent automatically meanwhile.
+- Tests: `tests/keep_on_close.js` (new, real browser) and `tests/typing_keep.js` (updated).
