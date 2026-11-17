@@ -567,7 +567,7 @@ script that is run once. They are not added to the app.
   | Follow-through | 30% | 90%+ | 80–89% | 70–79% | 50–69% | under 50% |
   | Due misses per case | 25% | ≤0.05 | 0.06–0.15 | 0.16–0.25 | 0.26–0.40 | over 0.40 |
   | Time to acknowledge | 10% | ≤30 min | 31–60 min | 1–2 h | 2–4 h | over 4 h |
-  | Productivity per active day vs region average | 25% | 110%+ | 90–109% | 75–89% | 60–74% | under 60% |
+  | Productivity per active day vs region average | 25% | 100%+ | 85–99% | 70–84% | 55–69% | under 55% |
   | Reminders left unacknowledged | 10% | 0 | 1 | 2 | 3–4 | 5+ |
 
   A KPI with no value for the agent (for example no due reminders, so no time to acknowledge and nothing open) is left
@@ -635,3 +635,42 @@ script that is run once. They are not added to the app.
   in each region. Earlier days are compared with the earlier region, and current days with the current region.
 * The tables and scorecard cards show this as "· earlier EMEA 3 days". The productivity result on the card says which
   regions the average mixes.
+
+## Follow-through, store number, quiet alerts, coordinator on duty, steadier screen (Nov 17, evening)
+
+* **Follow-through = total productivity ÷ total cases received**, in Agent productivity & due misses (dashboard, trend,
+  full table, Excel) and in the scorecard. It can go over 100% when cases are updated on several days.
+* **Store number:** a required field beside Account name in the case details (needed to close the case, logged in
+  Case History). In the Weekly report, the Account Name column shows the store number, or the account name when no
+  store number is set yet.
+* **Quiet alerts** (Settings → Profiles, managers and Vendor Management): the people on this list get no reminder alarms
+  and no alert or mention pop-ups; announcements still pop up. It starts with Joerolyn Franquelli and Jose Teves and is
+  saved in `config/quiet`.
+* **Coordinator on duty** (Agent Status, managers and coordinators choose; saved in `config/cod` with the history):
+  * The coordinator on duty gets every pop-up and alert, shows the aux "Coordinator on duty", and gets no cases.
+  * Coordinators not on duty get alerts for their own cases and mentions only. With nobody on duty, coordinators get
+    everything, as before.
+  * Time on duty is left out of productivity: updates made and cases received while on duty do not count.
+* **Steadier screen:**
+  * A case saved with a missing or odd field (no owner, items not a list, a null item, ...) could stop the whole screen
+    from drawing. Every case is now tidied when it is read, and if a redraw ever fails it tidies the data and draws again.
+  * The Streamlit frame height is now kept up to date (it was set once), so the app keeps filling the window.
+
+## Blank Account Name without a store number; no lost typing on a white flash (Nov 17, night)
+
+* **Weekly report:** the Account Name column shows the store number and stays blank when the case has none.
+* **White screen:** Streamlit rebuilds the app's frame (a white flash that loses unsaved typing) when something appears
+  above it or the server run fails. To stop that from happening:
+  * The connection spinner and the database error no longer appear above the app; the error sits in a fixed slot.
+  * The server always draws the app's frame, even if handling a request fails.
+* **If the frame reloads anyway** (for example a network drop or a server restart), the case that was open and what was
+  being typed (case details, Add Case) are kept in the browser (`pat_draft`, up to 2 hours). They are put back after the
+  reload, with the note "Restored what you were typing", and fields that save on change are saved.
+
+## Monthly filter by default; productivity top rating at 100% (Nov 17, night)
+
+* **Monthly filter:** Agent productivity & due misses, the Scorecard and My productivity open on **this month** (the
+  1st to today). The filter bar has a **Month** picker and **This month** / **Last month** buttons. An earlier month
+  covers the whole month. Dates can still be set by hand.
+* **Scorecard, productivity per active day vs the region average:** 100% or more = 5 (highest), 85–99% = 4,
+  70–84% = 3, 55–69% = 2, under 55% = 1.
