@@ -39,6 +39,27 @@
   var CID = 'c' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   var SEQ = 0, TICK = 0, PEND = {}, ACK = [], SYNC = false, VERS = {}, STORE = '', ERR = '', lastOk = 0, kickT = null, AWAIT = 0;
   var BOOT = {}, BOOT_OK = false, readyRes, READY = new Promise(function (r) { readyRes = r; });   // BOOT: everything saved so far, delivered with the very first render
+  /* Nov 18: the last data this browser saw is kept in its storage. When the page reloads (Streamlit reconnecting, a
+   * refresh), it is shown straight away instead of zeros, and replaced as soon as the server's copy arrives.
+   * While only this copy is shown (window.__petCacheOnly), the app moves no cases on its own. */
+  var BCACHE = 'pet_boot_cache', CACHED = false, cacheT = null;
+  var cacheSig = '';
+  function cacheSave() {
+    if (!BOOT_OK || CACHED) return;
+    try {
+      var sig = JSON.stringify(VERS); if (sig === cacheSig) return; cacheSig = sig;   // only when something changed
+      var keep = {}, skip = { act: 1, att: 1, mentions: 1 };
+      Object.keys(BOOT).forEach(function (c) { var b = BOOT[c]; if (b && !b.partial && b.docs && c.charAt(0) !== '_' && !/^assets/.test(c)) keep[c] = b; });
+      var put = function (o) { var j = JSON.stringify({ at: Date.now(), vers: VERS, boot: o }); if (j.length > 3500000) return false; localStorage.setItem(BCACHE, j); return true; };
+      if (!put(keep)) { Object.keys(skip).forEach(function (c) { delete keep[c]; }); if (!put(keep)) localStorage.removeItem(BCACHE); }
+    } catch (e) { try { localStorage.removeItem(BCACHE); } catch (e2) {} }
+  }
+  function cacheSoon() { if (cacheT) return; cacheT = setTimeout(function () { cacheT = null; cacheSave(); }, 4000); }
+  try {
+    var bc = JSON.parse(localStorage.getItem(BCACHE) || 'null');
+    if (bc && bc.boot && bc.vers && Date.now() - (bc.at || 0) < 12 * 3600000) { BOOT = bc.boot; BOOT_OK = true; CACHED = true; VERS = bc.vers; window.__petCacheOnly = true; }
+  } catch (e) {}
+  try { document.addEventListener('visibilitychange', function () { if (document.hidden) cacheSave(); }); window.addEventListener('pagehide', cacheSave); } catch (e) {}
 
   function send(type, extra) { try { window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, extra || {}), '*'); } catch (e) {} }
   function mkErr(msg, code) { var e = new Error(msg); e.code = code; return e; }
@@ -137,7 +158,8 @@
     var r = (d.args || {}).reply || {};
     var first = !SYNC;
     if (typeof r.now === 'number') { var sk = r.now - Date.now(); SKEW = SKEW == null ? sk : SKEW * 0.8 + sk * 0.2; }   // the server's clock (Nov 17)
-    if (r.boot && !BOOT_OK) { BOOT = r.boot; BOOT_OK = true; }
+    if (r.boot && (!BOOT_OK || CACHED)) { BOOT = r.boot; BOOT_OK = true; CACHED = false; window.__petCacheOnly = false; }
+    else if (CACHED && r.vers) { BOOT = {}; CACHED = false; window.__petCacheOnly = false; }   // no copy came with the answer: the stored one is dropped and everything is read from the server
     SYNC = true; AWAIT = 0; readyRes();
     STORE = r.store || STORE;
     DOWN = !!r.down;
@@ -160,7 +182,7 @@
       Object.keys(dl.docs).forEach(function (id) { var d = dl.docs[id]; if (d === null) delete b.docs[id]; else b.docs[id] = d; });
       b.version = dl.version;
     });
-    if (r.vers) { VERS = r.vers; onVers(); }
+    if (r.vers) { VERS = r.vers; onVers(); cacheSoon(); }
     if (Object.keys(PEND).some(function (k) { return !PEND[k].sent; })) kick();
   });
 
@@ -291,7 +313,7 @@
     use: async function (name) {
       if (name === 'db') {
         if (window.parent === window) return null;                       // opened outside Streamlit: local mode
-        if (!probe) probe = READY.then(function () { return true; });      // never fall back to local mode just because the first connection is slow (the status badge says when it is not connected)
+        if (!probe) probe = CACHED ? Promise.resolve(true) : READY.then(function () { return true; });   // Nov 18: with a kept copy the page starts at once      // never fall back to local mode just because the first connection is slow (the status badge says when it is not connected)
         return (await probe) ? DB : null;
       }
       if (name === 'user') return USER;
@@ -316,14 +338,16 @@
   /* Status badge: silent while everything works (like the rest of the page, saves just happen).
    * It appears only when something needs attention, and its text never changes while it is shown. */
   try {
-    var pill = null, shown = '', t0 = Date.now();
+    var pill = null, shown = '', t0 = Date.now(), pend = '', pendAt = 0;
     setInterval(function () {
       var t = '', bg = '#b45309';
-      var now = Date.now(), waiting = Object.keys(PEND).some(function (k) { var p = PEND[k]; return p.w && ((p.firstFail && now - p.firstFail > 3000) || (p.sent && now - p.sent > 8000)); });
+      var now = Date.now(), waiting = Object.keys(PEND).some(function (k) { var p = PEND[k]; return p.w && ((p.firstFail && now - p.firstFail > 8000) || (p.sent && now - p.sent > 20000)); });
       if (!SYNC) { if (now - t0 > 10000) t = '⚠ Not connected — changes are NOT saved'; }
       else if (DOWN || waiting) t = '⏳ Reconnecting to the database — your changes are kept and will save automatically';
       else if (ERR) { t = '❌ Storage error — changes may not be saved'; bg = '#b91c1c'; }
       else if (STORE === 'memory') t = '⚠ MongoDB not connected — data is NOT saved';
+      /* Nov 18: a hiccup of a few seconds is not shown (it fixes itself); the notice appears only if it lasts */
+      if (t && t !== shown) { if (t !== pend) { pend = t; pendAt = now; } if (now - pendAt < (t.indexOf('Reconnecting') >= 0 ? 45000 : 6000)) return; } else pend = '';   // reconnecting happens quietly in the background; it is shown only if it lasts
       if (t === shown) return;
       shown = t;
       if (!t) { if (pill) pill.style.display = 'none'; return; }
