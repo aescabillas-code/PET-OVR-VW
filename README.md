@@ -468,3 +468,28 @@ Checked: new feature checks (shift start with no browser open, near-EOS agent gi
 share, back from Unavailable, sign-in, next shift, own browser stays out while another screen balances) and the rule
 conflict fuzz now also runs the hand-over screen's balancing (60 scenarios, 0 violations, a second run moves nothing,
 also with the agents' own browsers switched off).
+
+## Productivity & due misses report update (Nov 17)
+
+* **Every update counts for productivity.** Any case an agent updates counts: a value in a field, a checklist item, a
+  maintenance window (set, updated, added, edited, end set), a reminder, closing it, and so on. Each update also marks the
+  case with the agent and the day (`wk` on the case, one time per day per agent), so the count no longer depends on the
+  case history being loaded. A case updated on a later day counts on that day too.
+  **Productivity = new cases received + cases updated, one per case per agent per day.** Several fields or updates on
+  one case on the same day count as 1. If the agent updates the same case again on another day (for example after
+  receiving it again), that counts 1 for that day. The day a new case was received is already counted under New cases
+  received, so updating it that day adds nothing. A hand-over case counts on the day the agent updates it. A period
+  total is the sum of its days. The full numbers table has the column **Cases updated (1 per case per day)**. Agent
+  Status's first number is the cases (other than that day's new ones) the agent updated that day.
+* **Numbers instead of bars.** The per-region table shows Productivity, Follow-through, Due misses, Due misses per case
+  and Avg time to acknowledge as centred numbers. The full numbers and due misses tables are centred too (long text
+  columns stay left-aligned).
+* **Graphs.** "Productivity and due misses per day" for the period (last 31 days at most), and "Productivity and due
+  misses per agent" in each region. The numbers are written on every bar.
+* **Excel instead of CSV.** "⬇ Download Excel" builds a formatted workbook. It has a Dashboard sheet (Needs attention rows
+  in red, with the per-day chart and one chart per region), Productivity (full numbers, total row, chart), Per day (with
+  chart) and Due misses.
+* **Daily trend:** "Net" is now **Variance** (created − closed), on screen and in the Excel file.
+
+One-time changes to data, like merging a person, profile or account, are done straight in the database with a separate
+script that is run once. They are not added to the app.
