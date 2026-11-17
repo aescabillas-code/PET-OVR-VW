@@ -96,9 +96,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   try {
     const rows = JSON.parse(cp.execFileSync(process.env.PYTHON || 'python3', ['-c', "import json,openpyxl;ws=openpyxl.load_workbook('" + path.join(root, 'templates/PET_Shift_Schedule_Template.xlsx') + "')['PET Team'];print(json.dumps([[('' if c.value is None else str(c.value)) for c in r] for r in ws.iter_rows()]))"]).toString());
     A.ctx.__aoa = rows; A.ctx.XLSX = { utils: { sheet_to_json: () => rows } };
-    const got = JSON.parse(A.run("(()=>{const g=gridRows({SheetNames:['PET Team'],Sheets:{'PET Team':{}}});return JSON.stringify(g.out.map(x=>[x.name,x.sch.join('|')]))})()"));
-    tplOk = got.length === 14 && got[0][0] === 'Jerold Solidum' && got[1][0] === 'Khristine Alcantara' && got[2][1].split('|')[2] === 'PTO' && got[11][0] === 'Roland De Juan' && got[3][1].split('|')[1] === '15:00-00:00';
-    console.log('PET Team template read by the importer:', got.length, 'people', tplOk);
+    const got = JSON.parse(A.run("(()=>{const g=monthRows({SheetNames:['PET Team'],Sheets:{'PET Team':{}}});return JSON.stringify({n:g.out.length,keys:g.keys.length,first:g.keys[0],last:g.keys[g.keys.length-1],name:g.out[0].name})})()"));
+    tplOk = got.n === 2 && got.keys === 31 && got.first === '2026-12-01' && got.last === '2026-12-31' && got.name === 'First Last';
+    console.log('monthly PET Team template read by the importer:', JSON.stringify(got), tplOk);
   } catch (e) { console.log('template check skipped:', String(e.message).slice(0, 80)); }
   // ---- theme: personal colours and image skin
   A.run("TD={p:'custom',c:'#be185d',font:'georgia',size:115};THEME_PREVIEW=J(TD);applyTheme()");

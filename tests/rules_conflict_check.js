@@ -62,7 +62,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
 (async () => {
   A = client({ role: 'manager', name: 'Jeff Bote' });
   await A.run('initDb()'); await sleep(2500);
-  A.run(`window.note=()=>{};SIMON=false;window.__V=[];window.__PH='other';window.__moves=0;
+  A.run(`window.note=()=>{};SIMON=false;ATT_OFF=true;/* attendance has its own checks; here every agent counts as logged in */window.__V=[];window.__PH='other';window.__moves=0;
   const __ra=reassign;
   reassign=function(c,to,why,by){const fr=c.owner,now=simNow(),on=onlineAgents(now,fr),ph=__PH;
     if(to!==QUEUE){const p=pers(to);if(!p||isMgr(p))__V.push('I1 case '+c.id+' given to manager/unknown '+to);

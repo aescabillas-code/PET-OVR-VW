@@ -92,18 +92,19 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   await C.run('initDb()'); await sleep(2500);
   check('a password set on one screen is known on a brand-new screen', String(C.run("PROFILE_HASHES['karensabile']||''")).includes(':'));
 
-  // ---------- Export current keeps the template look ----------
+  // ---------- Export current: monthly layout, template colours ----------
   const cells = {}; let blobName = '';
   const mkCell = key => cells[key] || (cells[key] = {});
-  A.ctx.ExcelJS = { Workbook: function () { this.addWorksheet = () => ({ getColumn: () => ({}), getRow: r => ({ getCell: c => mkCell(r + ':' + c), set height(v) {} }) }); this.xlsx = { writeBuffer: async () => new Uint8Array([1]) }; } };
+  A.ctx.ExcelJS = { Workbook: function () { this.addWorksheet = () => ({ getColumn: () => ({}), getCell: (r, c) => mkCell(r + ':' + c), getRow: r => ({ getCell: c => mkCell(r + ':' + c), set height(v) {} }) }); this.xlsx = { writeBuffer: async () => new Uint8Array([1]) }; } };
   A.ctx.saveBlob = (b, n) => { blobName = n; };
-  A.run('STAFF=[{name:"Q One",role:"Support",days:[1,1,1,1,1,0,0],sch:["12:00-21:00","15:00-00:00","18:00-03:00","OFF","PTO","OFF","09:00-17:00"]}]');
+  A.run('STAFF=[{name:"Q One",role:"Support",days:[1,1,1,1,1,0,0],sch:["OFF","09:00-17:00","09:00-17:00","09:00-17:00","09:00-17:00","09:00-17:00","OFF"],msch:{"2026-12-01":"12:00-21:00","2026-12-02":"18:00-03:00","2026-12-03":"OFF","2026-12-04":"PTO","2026-12-05":"Absent"}}];SCH_M="2026-12"');
   await A.run('sExport()');
   const col = (r, c) => (cells[r + ':' + c] && cells[r + ':' + c].fill && cells[r + ':' + c].fill.fgColor.argb);
-  check('export: header dark with yellow day names', col(1, 1) === 'FF404040' && cells['1:2'].font.color.argb === 'FFFFFF00' && cells['1:2'].value === 'SUN');
-  check('export: orange / orange / green shifts', col(2, 2) === 'FFFFC000' && col(2, 3) === 'FFFFC000' && col(2, 4) === 'FFB7E1A1');
-  check('export: pink OFF with dark-red text, dark-green PTO with white text', col(2, 5) === 'FFFFC7CE' && cells['2:5'].font.color.argb === 'FFC00000' && col(2, 6) === 'FF1E6B34' && cells['2:6'].font.color.argb === 'FFFFFFFF');
-  check('export: file name', blobName === 'PET_Shift_Schedule.xlsx');
+  check('export: monthly — dates of the month across the top, weekday row, dark header with yellow dates', cells['3:2'].value === '2026-12-01' && cells['3:32'].value === '2026-12-31' && cells['4:2'].value === 'Tue' && col(3, 2) === 'FF404040' && cells['3:2'].font.color.argb === 'FFFFFF00' && String(cells['1:2'].value).includes('2026-12'));
+  check('export: orange / green shifts by day of the month', cells['5:2'].value === '12:00-21:00' && col(5, 2) === 'FFFFC000' && col(5, 3) === 'FFB7E1A1');
+  check('export: pink OFF, dark-green PTO, Absent in dark red', col(5, 4) === 'FFFFC7CE' && cells['5:4'].font.color.argb === 'FFC00000' && col(5, 5) === 'FF1E6B34' && cells['5:6'].value === 'Absent' && col(5, 6) === 'FF7A1F3D');
+  check('export: a day with no monthly value uses the weekly pattern', cells['5:7'].value === 'OFF' && cells['5:8'].value === '09:00-17:00');
+  check('export: file name', blobName === 'PET_Shift_Schedule_2026-12.xlsx');
 
   // ---------- cases: checklist, acknowledge, reminders, maintenance window ----------
   A.run("GOT.cases=1;GOT.act=1;STAFF=" + A.run('JSON.stringify(STAFF)').replace(/^/, ''));
@@ -376,9 +377,10 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   {let got=null;const __sb=A.ctx.saveBlob;if(!A.ctx.Blob)A.ctx.Blob=Blob;if(!A.ctx.atob)A.ctx.atob=atob;A.ctx.saveBlob=(b,n)=>{got={b,n}};
    const repoB64=require('fs').readFileSync(path.join(root,'templates/PET_Shift_Schedule_Template.xlsx')).toString('base64');
    A.ctx.__petTemplate=()=>Promise.resolve({name:'PET_Shift_Schedule_Template.xlsx',b64:repoB64});
-   await A.ctx.sTemplate();check('the shift Template button downloads the file kept in the repo (templates/)', !!got&&got.n==='PET_Shift_Schedule_Template.xlsx'&&got.b.size===Buffer.from(repoB64,'base64').length);
+   {const __x=A.ctx.ExcelJS;A.ctx.ExcelJS={Workbook:function(){this.addWorksheet=()=>({getColumn:()=>({}),getCell:()=>({}),getRow:()=>({getCell:()=>({}),set height(v){}})});this.xlsx={writeBuffer:async()=>new Uint8Array([1,2])}}};A.run("SCH_M='2026-12'");await A.ctx.sTemplate();check('the Template button builds the monthly template for the month shown (names and the dates of the month)', !!got&&got.n==='PET_Shift_Schedule_Template_2026-12.xlsx');got=null;A.ctx.ExcelJS=undefined;
+   await A.ctx.sTemplate();check('without the Excel library it downloads the file kept in the repo (templates/)', !!got&&got.n==='PET_Shift_Schedule_Template.xlsx'&&got.b.size===Buffer.from(repoB64,'base64').length);
    got=null;A.ctx.__petTemplate=()=>Promise.reject(new Error('offline'));await A.ctx.sTemplate();check('it falls back to the built-in copy when the repo file cannot be reached', !!got&&got.b.size>1000);
-   A.ctx.__petTemplate=undefined;A.ctx.saveBlob=__sb}
+   A.ctx.__petTemplate=undefined;A.ctx.saveBlob=__sb;A.ctx.ExcelJS=__x}}
   A.run("RPT.view='weekly'");
   A.run("SIMON=false;CASES=REAL.cases");
   A.run("ME={role:'manager',name:'Jeff Bote'};saveMe()");
@@ -1443,10 +1445,10 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
       ME={role:'manager',name:'Jeff Bote'};applyMe()`);
     check('each update marks the case with the agent and day (kept on the case, not only in the history)', A.run("JSON.stringify(Object.keys(getCase('PW-1').wk||{}))") === '["Pw Ben"]' && A.run("Object.keys(getCase('PW-2').wk||{}).join()") === 'Pw Cy');
     A.run("CASES.forEach(c=>{c.log=[]})");   // even if the history is not loaded
-    const P = J(A.run("JSON.stringify(perfData().rows.map(r=>({n:r.n,oth:r.upd,p:prodOf(r)})))"));
+    const P = J(A.run("JSON.stringify(perfData().rows.map(r=>({n:r.n,oth:r.upO,p:prodOf(r)})))"));
     const pr = n => P.find(r => r.n === n) || {};
     check('a value added to a field, a checklist item and a maintenance window all count for productivity', pr('Pw Ben').oth === 2 && pr('Pw Ben').p === 2 && pr('Pw Cy').oth === 1 && pr('Pw Cy').p === 1, JSON.stringify(P));
-    check('the same case updated twice on a day counts once', (() => { A.run("ME={role:'agent',name:'Pw Ben'};applyMe();cdSet('PW-1','ritm','R1');ME={role:'manager',name:'Jeff Bote'};applyMe()"); return J(A.run("JSON.stringify(perfData().rows.find(r=>r.n==='Pw Ben').upd)")) === 2; })());
+    check('the same case updated twice on a day counts once', (() => { A.run("ME={role:'agent',name:'Pw Ben'};applyMe();cdSet('PW-1','ritm','R1');ME={role:'manager',name:'Jeff Bote'};applyMe()"); return J(A.run("JSON.stringify(perfData().rows.find(r=>r.n==='Pw Ben').upO)")) === 2; })());
     check('several fields and a checklist item on one case the same day still count as 1', (() => { A.run("ME={role:'agent',name:'Pw Cy'};applyMe();cdSet('PW-2','model','X1');cdSet('PW-2','ritm','R9');openId='PW-2';document.getElementById('new-in').value='Second item';addItem('PW-2');openId=null;ME={role:'manager',name:'Jeff Bote'};applyMe()"); return J(A.run("JSON.stringify(prodOf(perfData().rows.find(r=>r.n==='Pw Cy')))")) === 1 && A.run("dayParts('Pw Cy',simNow()).ho") === 1; })());
     check('the same case received on one day and updated on another day counts 1 for each of those days', (() => {
       A.run(`(()=>{const n=Date.now(),D=864e5,c=mkCase('PW-9','Pw Amy',{});c.ts=n-2*D;c.credit={n:'Pw Amy',at:n-2*D};c.wk={'Pw Amy':[n-2*D+60000,n-D]};CASES.push(c)})()`);
@@ -1459,7 +1461,8 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run("RPT.view='perf';setTabTo('reports')");
     const rb = String(A.els['set-body'].innerHTML);
     check('the productivity table shows numbers (no bars), centred', !/<rect x="0" y="0" width="100" height="10"/.test(rb) && /class="py-1\.5 px-2 text-center font-bold text-sm">2</.test(rb));
-    check('the full numbers table is centred and grouped: received, updated, productivity breakdown, due reminders', rb.includes('① Received in the period') && rb.includes('② Updated (follow-through)') && rb.includes('③ Productivity — 1 per case per day') && rb.includes('Own cases followed up') && /<td class="px-2 py-1\.5 border border-gray-200 text-center ">/.test(rb));
+    check('the full numbers table is centred: old cases and new cases (received and updated), productivity, due reminders', rb.includes('Old cases (hand-over / balanced)') && rb.includes('= Old updated + New updated') && !rb.includes('Own cases followed up') && /<td class="px-2 py-1\.5 border border-gray-200 text-center ">/.test(rb));
+    check('the note says productivity is based on updated cases only', rb.includes('<b>Note:</b> Productivity is based on updated cases only: a case that was assigned but not updated does not count.'));
     check('a guide explains every column', rb.includes('Guide: what each column means') && rb.includes('Several updates on one case in a day count as 1') && htmlSrc.includes("xlSheet(wb,sub,'Guide'"));
     check('graphs: productivity and due misses per day and per agent', rb.includes('Productivity and due misses per day') && rb.includes('Productivity and due misses per agent') && rb.includes('Due misses (right scale)'));
     check('the Excel download is wired to the lazy Excel library', htmlSrc.includes("'exportDaily','exportPerf'") && htmlSrc.includes('async function exportPerf()') && /pic\(ws1,perfDaySvg/.test(htmlSrc) && /pic\(ws2,perfAgentSvg/.test(htmlSrc));
@@ -1480,13 +1483,14 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
         const h=mkCase('JV-3','Jv Ann',{});h.ts=n-3*D;h.credit={n:'Jv Ann',at:n-3*D};h.credits=[{n:'Jv Mar',at:n-1.2*D}];h.owner='Jv Mar';h.wk={'Jv Mar':[n-1.1*D,n-30000]};CASES.push(h);   // hand-over, updated on 2 days
         a.wk={'Jv Mar':[n-1.5*D+60000,n-20000]};                                                                     // own case followed up today
         const o=mkCase('JV-4','Jv Bo',{});o.ts=n-6*D;o.credit={n:'Jv Bo',at:n-6*D};o.wk={'Jv Mar':[n-10000]};CASES.push(o)})()`);   // helping on a colleague's case
-    const R = J(A.run("JSON.stringify(perfData().rows.filter(r=>r.n==='Jv Mar').map(r=>({rg:r.rg,nw:r.nw,ho:r.ho,hoD:r.hoD,ownD:r.ownD,othD:r.othD,p:prodOf(r)})))"));
+    const R = J(A.run("JSON.stringify(perfData().rows.filter(r=>r.n==='Jv Mar').map(r=>({rg:r.rg,nw:r.nw,ho:r.ho,upN:r.upN,upO:r.upO,p:prodOf(r)})))"));
     check('counts split by a schedule change are combined into one row', R.length === 1, JSON.stringify(R));
     check('the row follows the agent\'s current region', R[0] && R[0].rg === 'APJ');
-    check('breakdown: 2 new received + 2 hand-over updates (2 days) + 1 own follow-up + 1 other = 6', R[0] && R[0].nw === 2 && R[0].hoD === 2 && R[0].ownD === 1 && R[0].othD === 1 && R[0].p === 6, JSON.stringify(R));
+    check('productivity = updated cases only: old cases 1 received, 3 updated (2 days + a colleague\'s case); new cases 2 received, 2 updated (one case on 2 days; the other not updated = 0) → 5', R[0] && R[0].nw === 2 && R[0].ho === 1 && R[0].upO === 3 && R[0].upN === 2 && R[0].p === 5, JSON.stringify(R));
     A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();RPT.view='perf';setTabTo('reports')");
     const mb = String(A.els['set-body'].innerHTML), mt = String(A.els['set-tabs'].innerHTML);
-    check('the dashboard table shows the breakdown next to productivity', mb.includes('<b>2</b> new</span> + <span class="nw"><b>2</b> hand-over</span> + <span class="nw"><b>1</b> follow-up</span> + <span class="nw"><b>1</b> other'));
+    check('the dashboard table shows old and new cases received with how many were updated (no breakdown)', mb.includes('<b>1</b> received</span> · <span class="nw"><b class="text-[#01A982]">3</b> updated') && mb.includes('<b>2</b> received</span> · <span class="nw"><b class="text-[#01A982]">2</b> updated') && !mb.includes('follow-up</span>'));
+    check('Unassigned is not shown', !mb.includes('🌏 Unassigned'));
     check('managers keep the full Reports (no "My productivity" tab)', mt.includes('📊 Reports') && !mt.includes('My productivity'));
     A.run("ME={role:'agent',name:'Jv Mar'};applyMe();setTabTo('reports')");
     const ab = String(A.els['set-body'].innerHTML), at = String(A.els['set-tabs'].innerHTML);
@@ -1508,21 +1512,33 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('a balanced or transferred case does not show as New', A.run("isNew(getCase('NT-2'))") === false);
     check('an older moved case still flagged in the database is not shown as New either', A.run("(()=>{const c=getCase('NT-3');c.nw=true;c.owner='Sc Ben';return isNew(c)})()") === false);
     // scorecard
-    const S = r => J(A.run(`JSON.stringify(scRows({rows:[${JSON.stringify(r)}]}).map(x=>({s:x.score,p:x.pts})))`))[0];
-    const base = { n: 'X', rg: 'APJ', nw: 6, nwU: 6, ho: 4, hoU: 4, upd: 4, hoD: 4, ownD: 0, othD: 0, closed: 0, miss: 0, ackMs: 0, ackN: 0, maxMs: 0, open: 0, act: 5 };
-    check('scorecard: an agent meeting every target scores 100 (On track)', S(base).s === 100 && A.run('scSt(100).l') === 'On track');
-    check('scorecard: 50% follow-through loses part of the 30 points', S({ ...base, nwU: 3, hoU: 2 }).p.rate === 18.8);
-    check('scorecard: 3 due misses on 10 cases lose part of the 25 points; 2 left open lose all 10', S({ ...base, miss: 3 }).p.mpc < 25 && S({ ...base, open: 2 }).p.open === 0);
-    check('scorecard: fewer than 8 cases is not scored', S({ ...base, nw: 3, ho: 2, nwU: 3, hoU: 2 }).s === null && A.run('scSt(null).l') === 'Not scored');
-    check('scorecard status bands: 85+ On track, 70–84 Watch, under 70 Below target', A.run("[scSt(85).l,scSt(84).l,scSt(70).l,scSt(69).l].join()") === 'On track,Watch,Watch,Below target');
+    const S = r => J(A.run(`JSON.stringify(scRows({rows:[${JSON.stringify(r)}]}).map(x=>({s:x.score,rt:x.rt,we:x.we,none:x.none})))`))[0];
+    const base = { n: 'X', rg: 'APJ', nw: 6, nwU: 6, ho: 4, hoU: 4, upN: 6, upO: 4, closed: 0, miss: 1, ackMs: 600000, ackN: 1, maxMs: 0, open: 0, act: 5 };
+    check('score table: weighted average of the ratings (follow-through 5, due misses 0.10 = 4, ack 10 min = 5, productivity at the region average = 4, nothing open = 5; no attendance yet, so its 15% is shared → 4.54)', S(base).s === 4.54 && S(base).rt.mpc === 4 && S(base).rt.prod === 4 && A.run('scSt(4.5).l') === 'Exceeds', JSON.stringify(S(base)));
+    check('score table: 50% follow-through is rated 2; 80% is rated 4', S({ ...base, nwU: 3, hoU: 2 }).rt.rate === 2 && S({ ...base, nwU: 4, hoU: 4 }).rt.rate === 4);
+    check('score table: due misses, time to acknowledge and open reminders rated 1–5', S({ ...base, miss: 5 }).rt.mpc === 1 && S({ ...base, ackMs: 3 * 3600000 }).rt.ack === 2 && S({ ...base, miss: 2, open: 1 }).rt.open === 4);
+    const mis = S({ ...base, miss: 0, ackN: 0, ackMs: 0 });
+    check('a missing KPI (no due reminders: no time to acknowledge, nothing open) shares its weight equally with the others', mis.rt.ack === null && mis.rt.open === null && mis.we.ack === 0 && mis.we.rate === 36.7 && mis.we.mpc === 31.7 && mis.we.prod === 31.7 && mis.s === 4.68, JSON.stringify(mis));
+    const nod = S({ ...base, nw: 0, nwU: 0, ho: 0, hoU: 0, upN: 0, upO: 0, miss: 0, ackN: 0, ackMs: 0, act: 0 });
+    check('an agent with no data gets no score at all', nod.none === true && nod.s === null);
+    check('fewer than 8 cases: ratings shown, no overall score', S({ ...base, nw: 3, ho: 2, nwU: 3, hoU: 2 }).s === null && S({ ...base, nw: 3, ho: 2, nwU: 3, hoU: 2 }).rt.rate === 5);
+    check('status bands: 4.50+ Exceeds, 3.50 On track, 2.50 Watch, under 2.50 Below target', A.run("[scSt(4.5).l,scSt(3.5).l,scSt(2.5).l,scSt(2.49).l].join()") === 'Exceeds,On track,Watch,Below target');
     A.run("RPT.view='perf';rptView('score')");
     const sb = String(A.els['set-body'].innerHTML);
-    check('Reports has a Scorecard view with cards per region, the guide and manager notes', sb.includes('🎯 Scorecard') && sb.includes('How the scorecard works') && sb.includes('Last 4 weeks') && sb.includes('Context note for') && sb.includes('/100'));
+    check('Reports has a Scorecard view with cards per region, the guide and manager notes', sb.includes('🎯 Scorecard') && sb.includes('Score table and how the scorecard works') && sb.includes('5 (highest)') && sb.includes('1 (lowest)') && sb.includes('Last 4 weeks') && sb.includes('Context note for') && sb.includes(' / 5'));
     A.run("scNote('Sc Amy','On leave 3 days')");
     A.run("ME={role:'agent',name:'Sc Amy'};applyMe();setTabTo('myperf')");
     const ab = String(A.els['set-body'].innerHTML);
     check('an agent sees their own scorecard (with the manager note) in My productivity', ab.includes('My scorecard') && ab.includes('Manager note:</b> On leave 3 days') && !ab.includes('Sc Ben</div>') && !ab.includes('Context note for'));
-    check('the Excel file has a Scorecard sheet', htmlSrc.includes("xlSheet(wb,sub,'Scorecard'"));
+    check('the Excel file has a Scorecard sheet and the score table', htmlSrc.includes("xlSheet(wb,sub,'Scorecard'") && htmlSrc.includes("xlSheet(wb,sub,'Score table'"));
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();STAFF.push({name:'Wency Villanueva',role:'Support',start:'06:00',end:'15:00',days:[1,1,1,1,1,1,1],status:'available'});(()=>{const c=mkCase('WV-1','Min Villanueva',{});c.wk={'Min Villanueva':[Date.now()-1000]};CASES.push(c)})();setTabTo('prof')");
+    const pb = String(A.els['set-body'].innerHTML);
+    check('Profiles has "Same person, two names" for managers', pb.includes('Same person, two names') && pb.includes('<option value="Min Villanueva">'));
+    A.run("document.getElementById('al-from').value='Min Villanueva';document.getElementById('al-to').value='Wency Villanueva';aliasSave()");
+    check('merging Min Villanueva into Wency Villanueva combines everything under Wency (saved, no code change)', A.run("canon('Min Villanueva')") === 'Wency Villanueva' && A.run("getCase('WV-1').owner") === 'Wency Villanueva' && A.run("ALIAS_DB['Min Villanueva']") === 'Wency Villanueva' && A.run("perfData().rows.some(r=>r.n==='Min Villanueva')") === false && String(A.els['set-body'].innerHTML).includes('<b>Min Villanueva</b> → Wency Villanueva'));
+    A.run("ME={role:'agent',name:'Wency Villanueva',coord:true};applyMe()");
+    check('a coordinator cannot merge names', (() => { A.run("ALIAS_DB={};aliasSave()"); return Object.keys(J(A.run('JSON.stringify(ALIAS_DB)'))).length === 0; })());
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe()");
     A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();RPT.view='weekly'");
   }
   // ---------- Nov 17 (d): bulk cases are not new; developer access; automatic EOS aux ----------
@@ -1553,6 +1569,55 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
       check('a wrong password still does not open it', A.run('ME.name') === '');
     } else check('developer access code is present (no crypto in this test runner)', htmlSrc.includes('async function devKeyOk(v)') && htmlSrc.includes("if(await devKeyOk(v)){note('Opened with developer access')"));
     A.run("ME={role:'manager',name:'Jeff Bote'};applyMe()");
+  }
+  // ---------- Nov 17 (e): monthly shift schedule, attendance, Absent ----------
+  {
+    const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const nowM = A.run('minOf(simNow())');
+    const ag = (name, a, b) => ({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: 'available' });
+    A.run('STAFF=' + JSON.stringify([ag('Ms Amy', -120, 300), ag('Ms Ben', -120, 300), ag('Ms Cy', -540, -30)]) + ';STAFF.forEach(p=>p.sch=mkSch(p));ensureMgrs(STAFF);STAFFLOADED=true;SIMON=false;CASES.length=0;RGH={}');
+    const tk = A.run('dkey(wall(simNow()))');
+    check('a day with no monthly value follows the weekly pattern', A.run("onShiftAt(pers('Ms Amy'),simNow())") === true);
+    A.run(`pers('Ms Amy').msch={'${tk}':'OFF'}`);
+    check('the monthly schedule decides the day: OFF today means not on shift', A.run("onShiftAt(pers('Ms Amy'),simNow())") === false);
+    A.run(`pers('Ms Amy').msch={'${tk}':'Absent'}`);
+    check('Absent is a schedule value: not on shift, gets no cases', A.run("onShiftAt(pers('Ms Amy'),simNow())") === false && A.run("parseCell('absent')") === 'Absent' && A.run("cellCls('Absent')").includes('7a1f3d'));
+    A.run(`delete pers('Ms Amy').msch`);
+    // monthly upload (Excel read stubbed: the sheet as rows)
+    A.run(`window.__X=window.XLSX;XLSX={utils:{sheet_to_json:ws=>ws.aoa}};window.__wb={SheetNames:['PET Team'],Sheets:{'PET Team':{aoa:[['PET Team — Monthly Shift Schedule','Month: 2026-12'],['legend'],['Name',...Array.from({length:31},(_,i)=>'2026-12-'+String(i+1).padStart(2,'0'))],['',...Array.from({length:31},()=>'Mon')],['Amy, Ms',...Array.from({length:31},(_,i)=>i%7===5||i%7===4?'OFF':'14:00-23:00')],['Dee New',...Array.from({length:31},(_,i)=>i===2?'absent':'06:00-15:00')]]}}}`);
+    const mr = J(A.run("JSON.stringify((()=>{const r=monthRows(__wb);return{n:r.out.length,names:r.out.map(x=>x.name),d3:r.out[1].m['2026-12-03'],k:r.keys.length}})())"));
+    check('the monthly template is read: names, every date of the month, Absent', mr.n === 2 && mr.names.join() === 'Ms Amy,Dee New' && mr.d3 === 'Absent' && mr.k === 31, JSON.stringify(mr));
+    A.run("applyMonth(monthRows(__wb));XLSX=__X");
+    check('upload keeps each person\'s days by date and shows that month', A.run("pers('Ms Amy').msch['2026-12-01']") === '14:00-23:00' && A.run("pers('Dee New').msch['2026-12-03']") === 'Absent' && A.run('SCH_M') === '2026-12');
+    check('the weekly pattern is derived from the month (fallback for days without a monthly value)', A.run("pers('Ms Amy').sch.filter(v=>v==='14:00-23:00').length") === 5);
+    A.run("setTabTo('shift')");
+    const sb = String(A.els['set-body'].innerHTML);
+    check('the Shift Schedule shows the whole month (1–31) with month navigation', sb.includes('Shift Schedule · Monthly') && sb.includes('type="month" value="2026-12"') && sb.includes('>31<br>Thu<') && sb.includes("sSetD("));
+    A.run("sSetD(STAFF.findIndex(p=>p.name==='Dee New'),'2026-12-04','pto')");
+    check('editing one day of the month saves it by date', A.run("pers('Dee New').msch['2026-12-04']") === 'PTO');
+    // region backtracked from the monthly schedule
+    A.run("pers('Ms Amy').msch=Object.assign({},pers('Ms Amy').msch,{'2026-10-05':'14:00-23:00','2026-10-06':'14:00-23:00','2026-11-05':'06:00-15:00','2026-11-06':'06:00-15:00'})");
+    check('the region of an earlier month comes from that month\'s schedule (EMEA in December/October, APJ in November)', A.run("regionAt('Ms Amy',new Date('2026-10-10T12:00:00').getTime())") === 'EMEA' && A.run("regionFor('Ms Amy',new Date('2026-11-01T00:00:00').getTime(),new Date('2026-11-30T23:00:00').getTime())") === 'APJ');
+    // attendance: not logged in by the start = Absent (no cases); logging in clears it (late)
+    A.run('STAFF=' + JSON.stringify([ag('At Amy', -120, 300), ag('At Ben', -120, 300), ag('At Cy', -540, -30)]) + ";STAFF.forEach(p=>p.sch=mkSch(p));ensureMgrs(STAFF);window.__db=DBON;window.__ga=GOT.att;DBON=true;GOT.att=1;ATT_SINCE=Date.now()-5*864e5;ATT={};ATT[attId('At Ben',dkey(wall(Date.now())))]={in:Date.now()-150*6e4}");
+    check('an agent on shift who has not logged in to PAT is Absent and gets no cases', A.run("isAbsentNow(pers('At Amy'),simNow())") === true && A.run("onlineAgents(simNow()).map(p=>p.name).join()") === 'At Ben' && A.run("coverFor(simNow(),null,undefined,true)") === 'At Ben');
+    A.run("render()");
+    check('Agent Status shows Absent', String(A.els['agent-list'].innerHTML).includes('>Absent</span>'));
+    A.run("ME={role:'agent',name:'At Amy'};applyMe();recordAtt()");
+    check('logging in records the time and removes Absent (late after the start)', A.run("isAbsentNow(pers('At Amy'),simNow())") === false && A.run("onlineAgents(simNow()).some(p=>p.name==='At Amy')") === true && A.run("ATT[attId('At Amy',dkey(wall(Date.now())))].late") >= 119);
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();attEosCheck()");
+    check('no log-in until EOS: the day is marked Absent automatically', A.run("attAutoAbsent(pers('At Cy'),dkey(wall(Date.now())))") === true);
+    const at = J(A.run("JSON.stringify(['At Amy','At Ben','At Cy'].map(n=>{const a=attOf(n,fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now());return{n,sch:a.sch,pres:a.pres,late:a.late,abs:a.abs}}))"));
+    check('attendance is matched with the schedule: present / late / absent', at[0].pres === 1 && at[0].late === 1 && at[1].pres === 1 && at[1].late === 0 && at[2].abs === 1, JSON.stringify(at));
+    A.run("RPT.view='perf';rptDays(1,true);setTabTo('reports')");
+    const pb = String(A.els['set-body'].innerHTML);
+    check('the productivity report shows attendance (per agent, in the full table and as a list)', pb.includes('>Attendance</th>') && pb.includes('Scheduled shifts') && pb.includes('🕘 Attendance (') && pb.includes('Absent'));
+    check('the Excel file has an Attendance sheet', htmlSrc.includes("xlSheet(wb,sub,'Attendance'"));
+    const S = r => J(A.run(`JSON.stringify(scRows({rows:[${JSON.stringify(r)}]}).map(x=>({s:x.score,rt:x.rt,we:x.we})))`))[0];
+    const base = { n: 'X', rg: 'APJ', nw: 6, nwU: 6, ho: 4, hoU: 4, upN: 6, upO: 4, closed: 0, miss: 1, ackMs: 600000, ackN: 1, maxMs: 0, open: 0, act: 5, att: { sch: 20, pres: 19, late: 1, lateMin: 10, abs: 1, list: [] } };
+    check('attendance is a scorecard KPI (15%): 95% is rated 4', S(base).rt.att === 4 && S(base).we.att === 15 && A.run("SCW.reduce((a,m)=>a+m.w,0)") === 100);
+    check('100% attendance is rated 5, under 80% is rated 1', S({ ...base, att: { sch: 20, pres: 20, late: 0, abs: 0, list: [] } }).rt.att === 5 && S({ ...base, att: { sch: 10, pres: 7, late: 0, abs: 3, list: [] } }).rt.att === 1);
+    A.run("DBON=__db;GOT.att=__ga;ATT={};ATT_SINCE=0;RPT.view='weekly';SCH_M=''");
   }
   // ---------- Nov 14: closed cases, name merge, regions ----------
   {
