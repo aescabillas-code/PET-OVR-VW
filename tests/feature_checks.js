@@ -1483,13 +1483,14 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
         const h=mkCase('JV-3','Jv Ann',{});h.ts=n-3*D;h.credit={n:'Jv Ann',at:n-3*D};h.credits=[{n:'Jv Mar',at:n-1.2*D}];h.owner='Jv Mar';h.wk={'Jv Mar':[n-1.1*D,n-30000]};CASES.push(h);   // hand-over, updated on 2 days
         a.wk={'Jv Mar':[n-1.5*D+60000,n-20000]};                                                                     // own case followed up today
         const o=mkCase('JV-4','Jv Bo',{});o.ts=n-6*D;o.credit={n:'Jv Bo',at:n-6*D};o.wk={'Jv Mar':[n-10000]};CASES.push(o)})()`);   // helping on a colleague's case
-    const R = J(A.run("JSON.stringify(perfData().rows.filter(r=>r.n==='Jv Mar').map(r=>({rg:r.rg,nw:r.nw,ho:r.ho,upN:r.upN,upO:r.upO,p:prodOf(r)})))"));
-    check('counts split by a schedule change are combined into one row', R.length === 1, JSON.stringify(R));
-    check('the row follows the agent\'s current region', R[0] && R[0].rg === 'APJ');
-    check('productivity = updated cases only: old cases 1 received, 3 updated (2 days + a colleague\'s case); new cases 2 received, 2 updated (one case on 2 days; the other not updated = 0) → 5', R[0] && R[0].nw === 2 && R[0].ho === 1 && R[0].upO === 3 && R[0].upN === 2 && R[0].p === 5, JSON.stringify(R));
+    const R = J(A.run("JSON.stringify(perfData().rows.filter(r=>r.n==='Jv Mar').map(r=>({rg:r.rg,nw:r.nw,ho:r.ho,upN:r.upN,upO:r.upO,p:prodOf(r),segs:r.segs})))"));
+    check('a schedule change does not split the agent: one row, in the current region', R.length === 1 && R[0].rg === 'APJ', JSON.stringify(R));
+    check('the days worked in the earlier region are kept apart for the comparison (EMEA 1 day, APJ 1 day)', R[0] && R[0].segs.some(g => g.rg === 'EMEA' && g.act === 1 && g.p === 2) && R[0].segs.some(g => g.rg === 'APJ' && g.act === 1 && g.p === 3), JSON.stringify(R));
+    check('the earlier days are compared with the earlier region\'s average (benchmark mixes the regions by days)', A.run("benchOf({segs:[{rg:'EMEA',p:4,act:2},{rg:'APJ',p:3,act:1}],rg:'APJ'},{EMEA:3,APJ:6})") === 4 && A.run("regionAvgs([{segs:[{rg:'EMEA',p:6,act:2}]},{segs:[{rg:'EMEA',p:2,act:2},{rg:'APJ',p:5,act:1}]}]).EMEA") === 2);
+    check('productivity = updated cases only, in total 5: old 1 received / 3 updated, new 2 received / 2 updated (the new case not updated = 0)', R.reduce((a,r)=>a+r.p,0) === 5 && R.reduce((a,r)=>a+r.upO,0) === 3 && R.reduce((a,r)=>a+r.upN,0) === 2 && R.reduce((a,r)=>a+r.nw,0) === 2 && R.reduce((a,r)=>a+r.ho,0) === 1, JSON.stringify(R));
     A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();RPT.view='perf';setTabTo('reports')");
     const mb = String(A.els['set-body'].innerHTML), mt = String(A.els['set-tabs'].innerHTML);
-    check('the dashboard table shows old and new cases received with how many were updated (no breakdown)', mb.includes('<b>1</b> received</span> · <span class="nw"><b class="text-[#01A982]">3</b> updated') && mb.includes('<b>2</b> received</span> · <span class="nw"><b class="text-[#01A982]">2</b> updated') && !mb.includes('follow-up</span>'));
+    check('the dashboard table shows old and new cases received with how many were updated (no breakdown)', mb.includes('<b>1</b> received</span> · <span class="nw"><b class="text-[#01A982]">3</b> updated') && mb.includes('<b>2</b> received</span> · <span class="nw"><b class="text-[#01A982]">2</b> updated') && mb.includes('· earlier EMEA 1 day') && !mb.includes('follow-up</span>'));
     check('Unassigned is not shown', !mb.includes('🌏 Unassigned'));
     check('managers keep the full Reports (no "My productivity" tab)', mt.includes('📊 Reports') && !mt.includes('My productivity'));
     A.run("ME={role:'agent',name:'Jv Mar'};applyMe();setTabTo('reports')");
@@ -1572,6 +1573,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   }
   // ---------- Nov 17 (e): monthly shift schedule, attendance, Absent ----------
   {
+    const attTxtCheck = () => true;
     const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
     const nowM = A.run('minOf(simNow())');
     const ag = (name, a, b) => ({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: 'available' });
@@ -1599,7 +1601,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run("pers('Ms Amy').msch=Object.assign({},pers('Ms Amy').msch,{'2026-10-05':'14:00-23:00','2026-10-06':'14:00-23:00','2026-11-05':'06:00-15:00','2026-11-06':'06:00-15:00'})");
     check('the region of an earlier month comes from that month\'s schedule (EMEA in December/October, APJ in November)', A.run("regionAt('Ms Amy',new Date('2026-10-10T12:00:00').getTime())") === 'EMEA' && A.run("regionFor('Ms Amy',new Date('2026-11-01T00:00:00').getTime(),new Date('2026-11-30T23:00:00').getTime())") === 'APJ');
     // attendance: not logged in by the start = Absent (no cases); logging in clears it (late)
-    A.run('STAFF=' + JSON.stringify([ag('At Amy', -120, 300), ag('At Ben', -120, 300), ag('At Cy', -540, -30)]) + ";STAFF.forEach(p=>p.sch=mkSch(p));ensureMgrs(STAFF);window.__db=DBON;window.__ga=GOT.att;DBON=true;GOT.att=1;ATT_SINCE=Date.now()-5*864e5;ATT={};ATT[attId('At Ben',dkey(wall(Date.now())))]={in:Date.now()-150*6e4}");
+    A.run('STAFF=' + JSON.stringify([ag('At Amy', -120, 300), ag('At Ben', -120, 300), ag('At Cy', -540, -30)]) + ";STAFF.forEach(p=>p.sch=mkSch(p));ensureMgrs(STAFF);window.__db=DBON;window.__ga=GOT.att;DBON=true;GOT.att=1;ATT_SINCE=Date.now()-45*864e5;ATT={};ATT[attId('At Ben',dkey(wall(Date.now())))]={in:Date.now()-150*6e4}");
     check('an agent on shift who has not logged in to PAT is Absent and gets no cases', A.run("isAbsentNow(pers('At Amy'),simNow())") === true && A.run("onlineAgents(simNow()).map(p=>p.name).join()") === 'At Ben' && A.run("coverFor(simNow(),null,undefined,true)") === 'At Ben');
     A.run("render()");
     check('Agent Status shows Absent', String(A.els['agent-list'].innerHTML).includes('>Absent</span>'));
@@ -1609,6 +1611,12 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('no log-in until EOS: the day is marked Absent automatically', A.run("attAutoAbsent(pers('At Cy'),dkey(wall(Date.now())))") === true);
     const at = J(A.run("JSON.stringify(['At Amy','At Ben','At Cy'].map(n=>{const a=attOf(n,fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now());return{n,sch:a.sch,pres:a.pres,late:a.late,abs:a.abs}}))"));
     check('attendance is matched with the schedule: present / late / absent', at[0].pres === 1 && at[0].late === 1 && at[1].pres === 1 && at[1].late === 0 && at[2].abs === 1, JSON.stringify(at));
+    A.run("ATT_SINCE=Date.now()-2*864e5");
+    const gm = J(A.run("JSON.stringify(['At Amy','At Cy'].map(n=>{const a=attOf(n,fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now());return{sch:a.sch,pres:a.pres,abs:a.abs}}))"));
+    check('the month attendance was set up in counts every scheduled shift as present (100%) except Absent on the schedule', gm[0].pres === 1 && gm[1].pres === 1 && gm[1].abs === 0 && attTxtCheck(), JSON.stringify(gm));
+    A.run(`pers('At Cy').msch={[dkey(wall(Date.now()))]:'Absent'}`);
+    check('an Absent tag on the schedule still counts as absent in that month', J(A.run("JSON.stringify(attOf('At Cy',fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now()))")).abs === 1);
+    A.run(`delete pers('At Cy').msch;ATT_SINCE=Date.now()-45*864e5`);
     A.run("RPT.view='perf';rptDays(1,true);setTabTo('reports')");
     const pb = String(A.els['set-body'].innerHTML);
     check('the productivity report shows attendance (per agent, in the full table and as a list)', pb.includes('>Attendance</th>') && pb.includes('Scheduled shifts') && pb.includes('🕘 Attendance (') && pb.includes('Absent'));
