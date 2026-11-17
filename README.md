@@ -757,3 +757,25 @@ The schedule that was overwritten must be uploaded again once, after this update
 - **Nothing visible.** No message, redraw or waiting while saving. The "Reconnecting" badge appears only if a
   database outage lasts more than 45 seconds. Unsaved changes are kept and sent automatically meanwhile.
 - Tests: `tests/keep_on_close.js` (new, real browser) and `tests/typing_keep.js` (updated).
+
+## Fix: the coordinator on duty is always Unavailable · COD (Nov 18, 02:00)
+
+- Before, the aux changed only at the moment someone picked the coordinator on duty on an updated screen. A duty set
+  earlier, or a status changed by an older screen, stayed Available.
+- Now `codEnforce()` keeps it right. The screen that runs the hand-overs checks every second, and the coordinator's own
+  screen every 5 seconds:
+  - the coordinator on duty is set to Unavailable · COD;
+  - anyone left on aux COD who is no longer on duty goes back to Available.
+- It waits until the schedule and the duty are loaded from the database, so it never acts on half-loaded data.
+
+## Store number: N/A or type it; Weekly report uses the account name for N/A (Nov 18, 02:15)
+
+- In case details, Store number is now a list:
+  - **N/A** saves "N/A". It counts as filled, so the case can be closed.
+  - **Type store number** shows a box under the list to type the number. The number saves as before, quietly while
+    typing, with the history line written when the box is left.
+  - Switching from N/A to Type clears the N/A.
+- Weekly report (screen and Excel), Account Name column:
+  - shows the store number when there is one;
+  - shows the account name entered in the case when the store number is N/A;
+  - stays blank when nothing is set.
