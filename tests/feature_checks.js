@@ -1425,8 +1425,46 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('dashboard: fewer than 8 cases is not judged', sc({ ...base8, nw: 3, nwU: 0, ho: 2, hoU: 0 }) === 'na');
     A.run("RPT.view='perf';setTabTo('reports')");
     const rb = String(A.els['set-body'].innerHTML);
-    check('Reports has the Agent productivity & due misses view with a CSV download', /Agent productivity &amp; due misses|Agent productivity & due misses/.test(rb) && rb.includes('perfCsv()') && rb.includes('Counted for'));
+    check('Reports has the Agent productivity & due misses view with an Excel download', /Agent productivity &amp; due misses|Agent productivity & due misses/.test(rb) && rb.includes('exportPerf()') && !rb.includes('perfCsv()') && rb.includes('Counted for'));
     check('the view opens with the Performance dashboard, grouped by region, with charts and a 4-week trend', rb.includes('Performance dashboard') && /🌏 (APJ|EMEA|AMS|Unassigned)/.test(rb) && rb.includes('<svg') && rb.includes('last 4 weeks'));
+    A.run("RPT.view='weekly'");
+  }
+  // ---------- Nov 17: every update counts for productivity; numbers instead of bars; charts; Variance ----------
+  {
+    const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const nowM = A.run('minOf(simNow())');
+    const ag = (name) => ({ name, role: 'Support', start: T(nowM - 300), end: T(nowM + 300), days: [1, 1, 1, 1, 1, 1, 1], status: 'available' });
+    A.run('STAFF=' + JSON.stringify([ag('Pw Amy'), ag('Pw Ben'), ag('Pw Cy')]) + ';ensureMgrs(STAFF);STAFFLOADED=true;SIMON=false;rptWeek(0);RPT.account="all";RPT.type="all"');
+    // three cases received earlier (a week ago) by Amy: today Ben fills a field, Cy adds a checklist item, Ben sets a maintenance window on another
+    A.run(`CASES.length=0;(()=>{const W=8*864e5,n=Date.now();['PW-1','PW-2','PW-3'].forEach(id=>{const c=mkCase(id,'Pw Amy',{});c.ts=n-W;c.credit={n:'Pw Amy',at:n-W};CASES.push(c)})})();
+      ME={role:'agent',name:'Pw Ben'};applyMe();cdSet('PW-1','model','DL380');
+      ME={role:'agent',name:'Pw Cy'};applyMe();openId='PW-2';document.getElementById('new-in').value='Check the cable';addItem('PW-2');openId=null;
+      ME={role:'agent',name:'Pw Ben'};applyMe();(()=>{const c=getCase('PW-3'),t=Date.now()+36e5;c.mw={s:t,e:null,by:'Pw Ben',ts:Date.now()};logc(c,'Maintenance window set','Pw Ben','x')})();
+      ME={role:'manager',name:'Jeff Bote'};applyMe()`);
+    check('each update marks the case with the agent and day (kept on the case, not only in the history)', A.run("JSON.stringify(Object.keys(getCase('PW-1').wk||{}))") === '["Pw Ben"]' && A.run("Object.keys(getCase('PW-2').wk||{}).join()") === 'Pw Cy');
+    A.run("CASES.forEach(c=>{c.log=[]})");   // even if the history is not loaded
+    const P = J(A.run("JSON.stringify(perfData().rows.map(r=>({n:r.n,oth:r.upd,p:prodOf(r)})))"));
+    const pr = n => P.find(r => r.n === n) || {};
+    check('a value added to a field, a checklist item and a maintenance window all count for productivity', pr('Pw Ben').oth === 2 && pr('Pw Ben').p === 2 && pr('Pw Cy').oth === 1 && pr('Pw Cy').p === 1, JSON.stringify(P));
+    check('the same case updated twice on a day counts once', (() => { A.run("ME={role:'agent',name:'Pw Ben'};applyMe();cdSet('PW-1','ritm','R1');ME={role:'manager',name:'Jeff Bote'};applyMe()"); return J(A.run("JSON.stringify(perfData().rows.find(r=>r.n==='Pw Ben').upd)")) === 2; })());
+    check('several fields and a checklist item on one case the same day still count as 1', (() => { A.run("ME={role:'agent',name:'Pw Cy'};applyMe();cdSet('PW-2','model','X1');cdSet('PW-2','ritm','R9');openId='PW-2';document.getElementById('new-in').value='Second item';addItem('PW-2');openId=null;ME={role:'manager',name:'Jeff Bote'};applyMe()"); return J(A.run("JSON.stringify(prodOf(perfData().rows.find(r=>r.n==='Pw Cy')))")) === 1 && A.run("dayParts('Pw Cy',simNow()).ho") === 1; })());
+    check('the same case received on one day and updated on another day counts 1 for each of those days', (() => {
+      A.run(`(()=>{const n=Date.now(),D=864e5,c=mkCase('PW-9','Pw Amy',{});c.ts=n-2*D;c.credit={n:'Pw Amy',at:n-2*D};c.wk={'Pw Amy':[n-2*D+60000,n-D]};CASES.push(c)})()`);
+      const one = d => A.run(`(()=>{const t=Date.now()-${d}*864e5,f=fromLI(ymd(wall(t))+'T00:00'),e=fromLI(ymd(wall(t))+'T23:59')+59999,r=perfData(f,e).rows.find(r=>r.n==='Pw Amy');return r?prodOf(r):0})()`);
+      const tot = A.run("(()=>{const t=Date.now()-2*864e5,r=perfData(fromLI(ymd(wall(t))+'T00:00'),Date.now()).rows.find(r=>r.n==='Pw Amy');return r?prodOf(r):0})()");
+      return one(2) === 1 && one(1) === 1 && tot === 2;
+    })());
+    check('Agent Status counts the cases they updated today too', A.run("dayParts('Pw Ben',simNow()).ho") === 2 && A.run("dayParts('Pw Cy',simNow()).ho") === 1);
+    check('cases received earlier and not updated in the period do not count for the agent who received them', pr('Pw Amy').p === 0);
+    A.run("RPT.view='perf';setTabTo('reports')");
+    const rb = String(A.els['set-body'].innerHTML);
+    check('the productivity table shows numbers (no bars), centred', !/<rect x="0" y="0" width="100" height="10"/.test(rb) && /class="py-1\.5 px-2 text-center font-bold text-sm">2</.test(rb));
+    check('the full numbers table is centred and has "Cases updated (1 per case per day)"', rb.includes('Cases updated (1 per case per day)') && /<td class="px-2 py-1\.5 border border-gray-200 text-center ">/.test(rb));
+    check('graphs: productivity and due misses per day and per agent', rb.includes('Productivity and due misses per day') && rb.includes('Productivity and due misses per agent') && rb.includes('Due misses (right scale)'));
+    check('the Excel download is wired to the lazy Excel library', htmlSrc.includes("'exportDaily','exportPerf'") && htmlSrc.includes('async function exportPerf()') && /pic\(ws1,perfDaySvg/.test(htmlSrc) && /pic\(ws2,perfAgentSvg/.test(htmlSrc));
+    A.run("RPT.view='daily';setTabTo('reports')");
+    const db = String(A.els['set-body'].innerHTML);
+    check('Daily trend shows Variance instead of Net', db.includes('>Variance</th>') && !db.includes('>Net</th>') && htmlSrc.includes("'Variance (created − closed)'"));
     A.run("RPT.view='weekly'");
   }
   // ---------- Nov 14: closed cases, name merge, regions ----------
