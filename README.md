@@ -604,3 +604,34 @@ script that is run once. They are not added to the app.
 * **Scorecard:** Attendance is a KPI (15%). 100% = 5, 95–99% = 4, 90–94% = 3, 80–89% = 2, under 80% = 1. The weights
   are now Follow-through 25%, Due misses 20%, Time to acknowledge 10%, Productivity 20%, Unacknowledged reminders 10%,
   Attendance 15%. A KPI with no value still shares its weight with the others.
+
+## Region by date, first-month attendance, speed (Nov 17, later)
+
+* **Region by date:** each case counts in the region the agent was in on the day they received it (received counts) or
+  updated it (productivity). The region comes from that day's shift on the monthly schedule (`regionOn`). Due misses
+  use the due date, and attendance uses the shift date. An agent whose region changed in the period appears in each
+  region with the counts for those days. Without a change, the agent has one row as before.
+* **First month of attendance** (the month tracking started in, from `config/att.since`): every scheduled shift counts
+  as present (100%), except days marked **Absent** on the schedule. Automatic Absent marks are not counted or shown for
+  that month. From the next month on, attendance comes from the log-in times. The live rule "not logged in by shift
+  start = no cases" still applies.
+* **Speed:**
+  * The productivity and scorecard numbers are worked out once per data version and reused across views, dates and the
+    trend (`PD_CACHE`).
+  * Every case is read once into an index (credits, update days, closes, due reminders), and each period only filters it.
+  * The per-day chart comes from the same pass instead of one recount per day.
+  * Name and person lookups are memoised.
+  * Agent Status day counts are computed once per redraw.
+
+  Measured with 1,500 cases and 60,000 history entries: opening the productivity view went from 0.59 s to 0.10 s
+  (0.05 s when reopened), the scorecard from 0.21 s to 0.01 s, and a full screen redraw from 36 ms to 16 ms.
+
+## One row per agent, earlier region compared separately (Nov 17, later)
+
+* A schedule or region change no longer splits an agent. Each agent is **one row in their current region** (monthly
+  schedule), in the dashboard, full numbers, scorecard and Excel file.
+* The days an agent worked in an earlier region during the period are kept apart (`segs`). In the scorecard,
+  productivity per active day is compared with a benchmark that mixes the region averages, weighted by the agent's days
+  in each region. Earlier days are compared with the earlier region, and current days with the current region.
+* The tables and scorecard cards show this as "· earlier EMEA 3 days". The productivity result on the card says which
+  regions the average mixes.
