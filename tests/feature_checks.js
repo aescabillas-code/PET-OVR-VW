@@ -1705,7 +1705,49 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run('wq=__wq;DBON=__db0');
     check('the automatic EOS aux, availability, aux reasons, idle sign-in and coordinator on duty all save status only', (htmlSrc.match(/saveStatus\(/g) || []).length >= 6 && !/eosAux=e;chn\.push\(p\.name\);ch=true\}\}\);\nif\(ch\)\{if\(!SIMON\)saveStaff/.test(htmlSrc));
     check('a newer schedule from another screen is never ignored because of a computer\'s clock', htmlSrc.includes("mine=!!STAFFT||STAFF_BUSY>0;if(Array.isArray(l)&&l.length)STAFF_DOC=dd;") && !htmlSrc.includes('(dd.ts||0)<STAFF_TS'));
-    check('the screen that runs the hand-over is chosen on the server\'s clock', htmlSrc.includes('function eosLeader(){if(SIMON||!DBON||!dbq||!MYID)return true;const now=srvNow();') && typeof A.run('srvNow()') === 'number');
+    check('the screen that runs the hand-over is chosen on the server\'s clock', htmlSrc.includes('function eosLeader(){if(SIMON||!DBON||!dbq||!MYID)return true;if(window.__petCacheOnly)return false;const now=srvNow();') && typeof A.run('srvNow()') === 'number');
+  }
+  // ---------- Nov 18: COD aux, transfer several cases, cached copy after a reload ----------
+  {
+    const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const nowM = A.run('minOf(simNow())');
+    const ag = (name, a, b, extra) => Object.assign({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: 'available' }, extra || {});
+    A.run('window.__ss=saveStatus;saveStatus=()=>{};STAFF=' + JSON.stringify([ag('Cd Amy', -200, 300, { coord: true }), ag('Cd Ben', -200, 300), ag('Cd Cy', -200, 300)]) + ';ensureMgrs(STAFF);STAFFLOADED=true;SIMON=false;ATT_OFF=true;COD={cur:null,hist:[]};ME={role:"manager",name:"Jeff Bote"};applyMe()');
+    A.run("codSet('Cd Amy')");
+    check('the coordinator on duty is set to Unavailable · COD by itself', A.run("[pers('Cd Amy').status,pers('Cd Amy').reason,auxLabel(pers('Cd Amy'))].join('|')") === 'unavailable|COD|COD (coordinator on duty)');
+    check('the coordinator on duty is never in the pool for new or moved cases', !A.run("pool().map(p=>p.name)").includes('Cd Amy'));
+    check('even a screen that does not know about the duty leaves them out (aux COD)', A.run("(()=>{const c=COD;COD={cur:null,hist:[]};const r=pool().some(p=>p.name==='Cd Amy');COD=c;return r})()") === false);
+    A.run("CASES.length=0;for(let i=0;i<6;i++)CASES.push(mkCase('CD-'+i,'Cd Ben',{}));balanceJoiners&&balanceJoiners(true)");
+    check('balancing gives the coordinator on duty no case', A.run("CASES.filter(c=>c.owner==='Cd Amy').length") === 0);
+    A.run("codSet('')");
+    check('when the duty ends they are Available again', A.run("pers('Cd Amy').status+'|'+pers('Cd Amy').reason") === 'available|');
+    A.run("codSet('Cd Amy');ME={role:'agent',name:'Cd Amy',coord:true};applyMe();window.__ap=availP;availP=()=>pers('Cd Amy');toggleAvailability();availP=__ap");
+    check('the coordinator on duty cannot switch themselves back to Available', A.run("pers('Cd Amy').status") === 'unavailable');
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();codSet('')");
+    // transfer several cases at once
+    A.run("CASES.length=0;['TX-1','TX-2','TX-3'].forEach(id=>CASES.push(mkCase(id,'Cd Ben',{})));const z=mkCase('TX-4','Cd Ben',{});z.closed=true;CASES.push(z);bulkOpen()");
+    check('Transfer cases lists the open cases with a tick box each', (A.run("$('add-card').innerHTML").match(/class="bx-ck"/g) || []).length === 3 && !A.run("$('add-card').innerHTML").includes('data-id="TX-4"'));
+    A.run("bulkFilter('tx-2');bulkAll(true)");
+    check('search + "Select all shown" ticks only what is shown', A.run("[...BULKX.sel].join()") === 'TX-2');
+    A.run("bulkTog('TX-1',true);bulkTog('TX-4',true);bulkGo('Cd Cy')");
+    check('several cases move to the chosen person in one go (closed ones never move)', A.run("['TX-1','TX-2','TX-3','TX-4'].map(i=>getCase(i).owner).join()") === 'Cd Cy,Cd Cy,Cd Ben,Cd Ben');
+    A.run("bulkOpen();bulkTog('TX-3',true);bulkGo('__next')");
+    check('"Next available agent" picks someone for each case', A.run("getCase('TX-3').owner") !== 'Cd Ben');
+    A.run("ME={role:'agent',name:'Cd Cy'};applyMe();bulkOpen()");
+    check('an agent sees only their own open cases', (A.run("$('add-card').innerHTML").match(/data-id="([^"]+)"/g) || []).map(x => x.slice(9, -1)).sort().join() === 'TX-1,TX-2' + (A.run("getCase('TX-3').owner") === 'Cd Cy' ? ',TX-3' : ''));
+    A.run("hide('add-modal');ME={role:'manager',name:'Jeff Bote'};applyMe()");
+    check('a "⇄ Transfer cases" button sits next to Add Case', htmlSrc.includes('onclick="bulkOpen()"'));
+    // reload: the copy kept in the browser
+    A.run("window.__petCacheOnly=true");
+    check('while only the browser\'s kept copy is shown, no screen deals hand-overs', A.run("eosLeader()") === false || A.run("SIMON||!DBON") === true);
+    check('... and no balancing runs on it', htmlSrc.split('STAFFLOADED&&!window.__petCacheOnly').length === 5);
+    A.run("window.__w=wq;window.__n=0;wq=()=>{__n++};window.__d=DBON;DBON=true;saveStatus=__ss;STAFF_DOC={list:J(STAFF),ts:1,rgh:{}};saveStatus('Cd Ben')");
+    check('a status save waits for the server\'s copy (no older schedule written back)', A.run('__n') === 0);
+    A.run("window.__petCacheOnly=false");
+    await sleep(1400);
+    check('then it is saved', A.run('__n') === 1);
+    A.run("wq=__w;DBON=__d;ATT_OFF=false");
+    check('loading shows … in the counters instead of 0', htmlSrc.includes("loadingNow?'<span class=\"opacity-40\" title=\"Loading…\">…</span>':num"));
   }
   // ---------- Nov 14: closed cases, name merge, regions ----------
   {

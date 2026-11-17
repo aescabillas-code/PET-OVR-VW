@@ -59,6 +59,11 @@ class Reconnect(unittest.TestCase):
         r = b.reply({"cid": "c1", "tick": 1})
         self.assertEqual(r["res"]["1"]["err"]["code"], "unavailable")
         self.assertTrue(r["res"]["1"]["err"]["retry"])  # the browser keeps the change and sends it again
+        self.assertFalse(r["down"])                     # Nov 18: a short hiccup is not shown (DOWN_GRACE)
+        self.assertIsNone(self.s.problem())
+        self.assertTrue(r["ok"])
+        self.s.down_since -= app.DOWN_GRACE + 1          # ... but an outage that lasts is
+        r = b.reply({"cid": "c1", "tick": 1})
         self.assertTrue(r["down"])
         self.assertIsNotNone(self.s.problem())
         self.s._vers_at -= app.VERS_TTL + 1
@@ -92,3 +97,23 @@ class Reconnect(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PushCap(unittest.TestCase):
+    def test_big_collections_are_not_pushed_with_the_answer(self):
+        s = app.MongoStore("mongodb://localhost:27017", "t")
+        app.execute(s, "put", {"c": "cases", "id": "a", "data": {"ts": 1, "blob": "x" * 2000}})
+        b = app.Bridge(s)
+        b.handle({"cid": "c1", "tick": 1, "reqs": [], "have": {"cases": 0}})
+        b.have["c1"] = {"cases": 999999}
+        saved = app.PUSH_MAX_BYTES
+        try:
+            app.PUSH_MAX_BYTES = 100
+            r = b.reply({"cid": "c1", "tick": 1})
+            self.assertNotIn("cases", r.get("fresh", {}))  # too big: the browser asks for it the normal way
+            app.PUSH_MAX_BYTES = saved
+            b._sizes.clear()
+            r = b.reply({"cid": "c1", "tick": 1})
+            self.assertIn("cases", r.get("fresh", {}))
+        finally:
+            app.PUSH_MAX_BYTES = saved
