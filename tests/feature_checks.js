@@ -961,6 +961,8 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     const h = String(A.els['case-body'].innerHTML);
     check('part ordered and delivered are greyed out and say they are not needed', /disabled[^>]*data-dtp="cd-pOrd"|data-dtp="cd-pOrd"[^>]*disabled/.test(h) && /disabled[^>]*data-dtp="cd-pDel"|data-dtp="cd-pDel"[^>]*disabled/.test(h) && h.includes('not needed for Cabling/HOD') && h.includes('> Cabling/HOD <'));
     check('CE arrival stays editable', !/disabled[^>]*data-dtp="cd-ceArr"|data-dtp="cd-ceArr"[^>]*disabled/.test(h));
+    check('the store number is required to close a case', miss().includes('Store Number'));
+    A.run("cdSet('CB-1','store','4521')");
     check('a cabling case can be closed without part ordered and delivered dates', !miss().includes('Part Ordered Time') && !miss().includes('Part Delivered Time') && miss().length === 0, miss());
     A.run("cdCable('CB-1',false)");
     check('unticking brings the part dates back as required', miss().includes('Part Ordered Time') && miss().includes('Part Delivered Time'));
@@ -1418,7 +1420,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('still unacknowledged reminders are shown as open', amy.open === 1);
     check('received cases split into new and hand-over, with how many were updated', amy.nw === 2 && ben.nw === 1 && ben.nwU === 1 && ben.ho === 1, JSON.stringify(D.rows));
     check('older cases without the new ownership history are back-tracked from Case History', A.run("(()=>{const c=getCase('PF-1'),o=c.ownh;c.ownh=null;const tl=ownTimeline(c);c.ownh=o;return tl.map(x=>x.n).join('>')})()") === 'Pf Amy>Pf Ben');
-    const sc = r => A.run(`perfScore(${JSON.stringify(r)}).st`);
+    const sc = r0 => { const r = { ...r0, upN: r0.upN != null ? r0.upN : r0.nwU, upO: r0.upO != null ? r0.upO : r0.hoU }; return A.run(`perfScore(${JSON.stringify(r)}).st`); };
     const base = { n: 'X', nw: 6, nwU: 5, ho: 4, hoU: 4, closed: 0, miss: 0, ackMs: 0, ackN: 0, maxMs: 0, open: 0 };
     const base8 = { n: 'X', nw: 6, nwU: 5, ho: 4, hoU: 4, closed: 0, miss: 0, ackMs: 0, ackN: 0, maxMs: 0, open: 0 };
     check('dashboard: a normal agent is not highlighted (even at 70% updated with a miss)', sc(base8) === 'ok' && sc({ ...base8, nwU: 3, miss: 1, ackN: 1, ackMs: 3600000 }) === 'ok');
@@ -1515,11 +1517,11 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     // scorecard
     const S = r => J(A.run(`JSON.stringify(scRows({rows:[${JSON.stringify(r)}]}).map(x=>({s:x.score,rt:x.rt,we:x.we,none:x.none})))`))[0];
     const base = { n: 'X', rg: 'APJ', nw: 6, nwU: 6, ho: 4, hoU: 4, upN: 6, upO: 4, closed: 0, miss: 1, ackMs: 600000, ackN: 1, maxMs: 0, open: 0, act: 5 };
-    check('score table: weighted average of the ratings (follow-through 5, due misses 0.10 = 4, ack 10 min = 5, productivity at the region average = 4, nothing open = 5; no attendance yet, so its 15% is shared → 4.54)', S(base).s === 4.54 && S(base).rt.mpc === 4 && S(base).rt.prod === 4 && A.run('scSt(4.5).l') === 'Exceeds', JSON.stringify(S(base)));
-    check('score table: 50% follow-through is rated 2; 80% is rated 4', S({ ...base, nwU: 3, hoU: 2 }).rt.rate === 2 && S({ ...base, nwU: 4, hoU: 4 }).rt.rate === 4);
+    check('score table: weighted average of the ratings (follow-through 5, due misses 0.10 = 4, ack 10 min = 5, productivity at the region average = 5 (100% is the top), nothing open = 5; no attendance yet, so its 15% is shared → 4.77)', S(base).s === 4.77 && S(base).rt.mpc === 4 && S(base).rt.prod === 5 && A.run('scSt(4.5).l') === 'Exceeds', JSON.stringify(S(base)));
+    check('score table: 50% follow-through is rated 2; 80% is rated 4 (follow-through = productivity ÷ cases received)', S({ ...base, upN: 3, upO: 2 }).rt.rate === 2 && S({ ...base, upN: 4, upO: 4 }).rt.rate === 4);
     check('score table: due misses, time to acknowledge and open reminders rated 1–5', S({ ...base, miss: 5 }).rt.mpc === 1 && S({ ...base, ackMs: 3 * 3600000 }).rt.ack === 2 && S({ ...base, miss: 2, open: 1 }).rt.open === 4);
     const mis = S({ ...base, miss: 0, ackN: 0, ackMs: 0 });
-    check('a missing KPI (no due reminders: no time to acknowledge, nothing open) shares its weight equally with the others', mis.rt.ack === null && mis.rt.open === null && mis.we.ack === 0 && mis.we.rate === 36.7 && mis.we.mpc === 31.7 && mis.we.prod === 31.7 && mis.s === 4.68, JSON.stringify(mis));
+    check('a missing KPI (no due reminders: no time to acknowledge, nothing open) shares its weight equally with the others', mis.rt.ack === null && mis.rt.open === null && mis.we.ack === 0 && mis.we.rate === 36.7 && mis.we.mpc === 31.7 && mis.we.prod === 31.7 && mis.s === 5, JSON.stringify(mis));
     const nod = S({ ...base, nw: 0, nwU: 0, ho: 0, hoU: 0, upN: 0, upO: 0, miss: 0, ackN: 0, ackMs: 0, act: 0 });
     check('an agent with no data gets no score at all', nod.none === true && nod.s === null);
     check('fewer than 8 cases: ratings shown, no overall score', S({ ...base, nw: 3, ho: 2, nwU: 3, hoU: 2 }).s === null && S({ ...base, nw: 3, ho: 2, nwU: 3, hoU: 2 }).rt.rate === 5);
@@ -1626,6 +1628,72 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('attendance is a scorecard KPI (15%): 95% is rated 4', S(base).rt.att === 4 && S(base).we.att === 15 && A.run("SCW.reduce((a,m)=>a+m.w,0)") === 100);
     check('100% attendance is rated 5, under 80% is rated 1', S({ ...base, att: { sch: 20, pres: 20, late: 0, abs: 0, list: [] } }).rt.att === 5 && S({ ...base, att: { sch: 10, pres: 7, late: 0, abs: 3, list: [] } }).rt.att === 1);
     A.run("DBON=__db;GOT.att=__ga;ATT={};ATT_SINCE=0;RPT.view='weekly';SCH_M=''");
+  }
+  // ---------- Nov 17 (f): follow-through, store number, quiet alerts, coordinator on duty, robust drawing ----------
+  {
+    const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const nowM = A.run('minOf(simNow())');
+    const ag = (name, a, b) => ({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: 'available' });
+    A.run('STAFF=' + JSON.stringify([ag('Cd Amy', -120, 300), ag('Cd Ben', -120, 300), ag('Cd Coord', -120, 300), ag('Cd Coord2', -120, 300), ag('Joerolyn Franquelli', -120, 300)]) + ";STAFF.forEach(p=>p.sch=mkSch(p));ensureMgrs(STAFF);STAFFLOADED=true;SIMON=false;CASES.length=0;RGH={};COORDS.push('Cd Coord','Cd Coord2');COD={cur:null,hist:[]};QUIET=null;rptDays(7,true);RPT.account='all';RPT.type='all'");
+    // follow-through = productivity ÷ received
+    A.run("(()=>{const n=Date.now();for(let i=0;i<4;i++){const c=mkCase('FT-'+i,'Cd Amy',{});c.credit={n:'Cd Amy',at:n-3600000};if(i<2)c.wk={'Cd Amy':[n-1800000]};CASES.push(c)}})()");
+    check('follow-through = total productivity ÷ total cases received (2 updated of 4 = 50%)', A.run("Math.round(ftOf(perfData().rows.find(r=>r.n==='Cd Amy'))*100)") === 50 && A.run("Math.round(perfScore(perfData().rows.find(r=>r.n==='Cd Amy')).rate*100)") === 50);
+    // store number
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();openId='FT-0';renderCase()");
+    const cb = String(A.els['case-body'].innerHTML);
+    check('case details: Store number beside Account name, marked required', /Account name<\/label>[\s\S]{0,400}Store number <span class="text-red-600">\*<\/span>/.test(cb) && cb.includes('id="cd-store"'));
+    A.run("cdSet('FT-0','store','7788');getCase('FT-0').account='Account A';openId=null");
+    check('the store number is saved and logged in Case History', A.run("getCase('FT-0').store") === '7788' && A.run("getCase('FT-0').log.some(l=>l.action==='Store number updated'&&l.details==='7788')") === true);
+    check('Weekly report: the Account Name column shows the store number', A.run("RF('account').g(getCase('FT-0'))") === '7788' && htmlSrc.includes("x.value=k==='account'?String(cs.store||'').trim():rv(rw,k);"));
+    check('Weekly report: the Account Name column stays blank when there is no store number', A.run("RF('account').g(getCase('FT-1'))") === '');
+    check('what is being typed is kept in the browser and put back after a reload', htmlSrc.includes("document.addEventListener('input',draftInput,true)") && htmlSrc.includes('function draftRestore()') && htmlSrc.includes("try{draftRestore()}catch(e){}"));
+    // quiet alerts
+    A.run("ME={role:'agent',name:'Joerolyn Franquelli'};applyMe()");
+    check('Joerolyn Franquelli and Jose Teves get no alarms or alert pop-ups (announcements still pop up)', A.run('quietMe()') === true && A.run("isQuiet('Jose Teves')") === true && A.run("(()=>{const ss=syncSound;syncSound=()=>{};ASND={};alertSound('rem-pop','rem',true);const a=!ASND['rem-pop'];alertSound('ann-pop','ann',false);const b=!!ASND['ann-pop'];ASND={};syncSound=ss;return a&&b})()") === true);
+    A.run("ME={role:'agent',name:'Cd Amy'};applyMe()");
+    check('everyone else still gets them', A.run('quietMe()') === false);
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();setTabTo('prof')");
+    check('Profiles has "Quiet alerts" to change the list', String(A.els['set-body'].innerHTML).includes('🔕 Quiet alerts'));
+    A.run("quietSet('Jose Teves',false)");
+    check('a person can be taken off the quiet list', A.run("isQuiet('Jose Teves')") === false && A.run("isQuiet('Joerolyn Franquelli')") === true);
+    // coordinator on duty
+    A.run("codSet('Cd Coord')");
+    check('a coordinator can be elected on duty', A.run('codName()') === 'Cd Coord');
+    check('the coordinator on duty gets no cases', !A.run("pool().some(p=>p.name==='Cd Coord')") && A.run("coverFor(simNow(),null,undefined,true)") !== 'Cd Coord');
+    A.run('render()');
+    const al = String(A.els['agent-list'].innerHTML);
+    check('Agent Status shows the aux "Coordinator on duty" and who is on duty', al.includes('>Coordinator on duty</span>') && al.includes('🎧 Coordinator on duty:'));
+    A.run("ME={role:'agent',name:'Cd Coord',coord:true};applyMe()");
+    check('the coordinator on duty gets every pop-up and alert', A.run('monitorAll()') === true);
+    A.run("ME={role:'agent',name:'Cd Coord2',coord:true};applyMe()");
+    check('a coordinator not on duty only gets alerts for their own cases (and mentions)', A.run('monitorAll()') === false);
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe()");
+    check('managers still get everything', A.run('monitorAll()') === true);
+    // on-duty time is left out of productivity
+    A.run("(()=>{const n=Date.now();COD.cur={n:'Cd Coord',from:n-7200000,by:'x'};const a=mkCase('CO-1','Cd Ben',{});a.credit={n:'Cd Ben',at:n-9000000};a.wk={'Cd Coord':[n-3600000]};CASES.push(a);const b=mkCase('CO-2','Cd Ben',{});b.credit={n:'Cd Ben',at:n-9000000};b.wk={'Cd Coord':[n-9000000]};CASES.push(b)})()");
+    check('updates made while on duty do not count for productivity (only the one before duty counts)', A.run("prodOf(perfData().rows.find(r=>r.n==='Cd Coord')||{})") === 1);
+    A.run("codSet('')");
+    check('ending duty puts the coordinator back in the case pool', A.run("pool().some(p=>p.name==='Cd Coord')") === true && A.run("COD.hist.some(h=>h.n==='Cd Coord'&&h.to)") === true);
+    // a damaged case record cannot blank the screen
+    A.run("(()=>{const c=mkCase('BAD-1','Cd Amy',{});c.items=null;c.owner=null;c.log='x';normCase(c);CASES.unshift(c)})();render()");
+    check('a case saved with missing or odd fields is tidied and the screen still draws', String(A.els['agent-list'].innerHTML).includes('Cd Amy') && Array.isArray(A.run("getCase('BAD-1').items")) && A.run("typeof getCase('BAD-1').owner") === 'string');
+    check('if the screen ever fails to draw, it tidies the data and draws again', htmlSrc.includes("catch(e){if(window.console)console.error('render',e);try{CASES.forEach(normCase)"));
+    A.run("COORDS.splice(COORDS.indexOf('Cd Coord'),2);QUIET=null;COD={cur:null,hist:[]}");
+  }
+  // ---------- Nov 17 (g): monthly filter by default; productivity 100% of the average = 5 ----------
+  {
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();RPT.view='weekly';rptView('perf')");
+    const mon = A.run("dkey(wall(Date.now())).slice(0,7)"), today = A.run("ymd(wall(Date.now()))");
+    check('Agent productivity & due misses opens on this month (1st of the month to today)', A.run('RPT.from') === mon + '-01' && A.run('RPT.to') === today && String(A.els['set-body'].innerHTML).includes('type="month" value="' + mon + '"') && String(A.els['set-body'].innerHTML).includes('This month (recommended)'));
+    A.run("RPT.view='weekly';rptView('score')");
+    check('the Scorecard opens on this month too', A.run('RPT.from') === mon + '-01' && String(A.els['set-body'].innerHTML).includes('Last month'));
+    A.run("rptMonth(-1)");
+    check('Last month selects the whole previous month', A.run('RPT.from').endsWith('-01') && A.run('RPT.from') < mon + '-01' && A.run("RPT.to") === A.run("ymd(new Date(new Date(RPT.from+'T00:00:00').getFullYear(),new Date(RPT.from+'T00:00:00').getMonth()+1,0))"));
+    A.run("rptMonth(0,false,'2026-10')");
+    check('a month can be picked', A.run('RPT.from') === '2026-10-01' && A.run('RPT.to') === '2026-10-31');
+    const S = r => J(A.run(`JSON.stringify(scRows({rows:[${JSON.stringify(r)}]}).map(x=>x.rt.prod))`))[0];
+    check('productivity per active day: 100% of the region average is the top rating (5), then 85% = 4, 70% = 3, 55% = 2', A.run("SCW.find(m=>m.k==='prod').b.join('|')") === '100% of the average or more|85–99%|70–84%|55–69%|under 55%' && A.run("band(1,[1,.85,.7,.55])") === 5 && A.run("band(.9,[1,.85,.7,.55])") === 4 && A.run("band(.6,[1,.85,.7,.55])") === 2 && A.run("band(.5,[1,.85,.7,.55])") === 1);
+    A.run("RPT.view='weekly';rptWeek(0)");
   }
   // ---------- Nov 14: closed cases, name merge, regions ----------
   {
