@@ -549,3 +549,58 @@ script that is run once. They are not added to the app.
   When their next shift starts it is set back to Available (only if it is still the automatic EOS), so they get cases
   again as before. An agent who switches back to Available after EOS (overtime) is not set to EOS again for that shift.
   EOS is not in the list of reasons an agent picks by hand.
+
+## Productivity = updated cases only; 1–5 scorecard; name merges from the database (Nov 17, later)
+
+* **Productivity = old cases updated (hand-over / balanced / bulk) + new cases updated**, one per case per day. A case that
+  was assigned but not updated does not count. A note says so on the dashboard, above the full numbers table, in the
+  guide and in the Excel file.
+* The breakdown has been removed. Each agent now shows **Old cases: received · updated** and **New cases: received ·
+  updated**. The full table has the columns Old cases (Received, Updated), New cases (Received, Updated),
+  Productivity (old updated + new updated), Update rate, and the due reminder columns.
+* **Unassigned** rows (no region, or the name "Unassigned") are not shown.
+* **Scorecard, rated 1 to 5.** Each KPI is rated with the score table below. The overall score is the weighted average of
+  the ratings, from 1.00 to 5.00. Exceeds 4.50+, On track 3.50–4.49, Watch 2.50–3.49, Below target under 2.50.
+
+  | KPI | Weight | 5 (highest) | 4 | 3 | 2 | 1 (lowest) |
+  |---|---|---|---|---|---|---|
+  | Follow-through | 30% | 90%+ | 80–89% | 70–79% | 50–69% | under 50% |
+  | Due misses per case | 25% | ≤0.05 | 0.06–0.15 | 0.16–0.25 | 0.26–0.40 | over 0.40 |
+  | Time to acknowledge | 10% | ≤30 min | 31–60 min | 1–2 h | 2–4 h | over 4 h |
+  | Productivity per active day vs region average | 25% | 110%+ | 90–109% | 75–89% | 60–74% | under 60% |
+  | Reminders left unacknowledged | 10% | 0 | 1 | 2 | 3–4 | 5+ |
+
+  A KPI with no value for the agent (for example no due reminders, so no time to acknowledge and nothing open) is left
+  out, and its weight is shared equally by the other KPIs. An agent with no data in the period shows "No data" with no
+  score. With fewer than 8 cases, the ratings are shown but there is no overall score. The Excel file has the Scorecard
+  and Score table sheets.
+* **Same person, two names** (Settings → Profiles, managers and Vendor Management only): choose the name typed another
+  way and the name on the schedule to keep, then click **Merge**. Productivity, scorecard, due misses, case history and
+  region are then counted under the kept name. Merges are saved in `config/aliases`, so no code change or script is
+  needed. ✕ undoes a merge (after a refresh).
+
+## Monthly shift schedule, attendance and Absent (Nov 17, later)
+
+* **Monthly schedule.** Settings → Shift Schedule shows a whole month (‹ month ›). Each person has one value per day: a
+  shift time, OFF, PTO or **Absent**. Values are saved by date (`msch` on each person in the staff list; about 13 months
+  are kept). A day without a monthly value falls back to the weekly pattern (shown faded).
+  * **Template** downloads the monthly layout for the month shown: names in column A, the dates across row 3
+    (YYYY-MM-DD) and weekdays in row 4. `templates/PET_Shift_Schedule_Template.xlsx` and the built-in copy use the same
+    layout.
+  * **Upload** reads that layout, keeps earlier months, and sets the weekly fallback from the month. The old 7-day
+    layout still uploads as the weekly pattern.
+  * **Export current** writes the month shown in the same layout.
+* **Region backtracking:** the region an agent had in a month comes from that month's schedule. The productivity report
+  and scorecard use the region the agent worked in during the selected period (still one row per agent).
+* **Log-in time and attendance:** the first time an agent is signed in to PAT for a shift (from 2 h before its start) is
+  saved in `att/<name>_<date>`. Agents who stay signed in are recorded when the shift window starts.
+  * **Absent:** an agent on shift with no log-in yet shows as Absent (Agent Status and Shift Schedule) and gets **no
+    cases** (round robin, hand-over, balancing) until they log in.
+  * Logging in clears Absent at once; it counts as **Late** if the log-in is more than 5 minutes after the start.
+  * No log-in before EOS: the screen that runs the hand-over marks the day Absent automatically.
+  * Attendance is counted from the day this version first runs (`config/att.since`).
+* **Reports:** the productivity report shows attendance per agent, in the full table (scheduled shifts, present, late,
+  absent, attendance %) and as a list (🕘 Attendance). The Excel file has an Attendance sheet.
+* **Scorecard:** Attendance is a KPI (15%). 100% = 5, 95–99% = 4, 90–94% = 3, 80–89% = 2, under 80% = 1. The weights
+  are now Follow-through 25%, Due misses 20%, Time to acknowledge 10%, Productivity 20%, Unacknowledged reminders 10%,
+  Attendance 15%. A KPI with no value still shares its weight with the others.
