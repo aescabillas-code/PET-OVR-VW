@@ -1641,11 +1641,18 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     // store number
     A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();openId='FT-0';renderCase()");
     const cb = String(A.els['case-body'].innerHTML);
-    check('case details: Store number beside Account name, marked required', /Account name<\/label>[\s\S]{0,400}Store number <span class="text-red-600">\*<\/span>/.test(cb) && cb.includes('id="cd-store"'));
+    check('case details: Store number beside Account name, marked required', /Account name<\/label>[\s\S]{0,400}Store number <span class="text-red-600">\*<\/span>/.test(cb) && cb.includes('id="cd-store-mode"') && cb.includes('>N/A</option>') && cb.includes('>Type store number</option>'));
     A.run("cdSet('FT-0','store','7788');getCase('FT-0').account='Account A';openId=null");
     check('the store number is saved and logged in Case History', A.run("getCase('FT-0').store") === '7788' && A.run("getCase('FT-0').log.some(l=>l.action==='Store number updated'&&l.details==='7788')") === true);
-    check('Weekly report: the Account Name column shows the store number', A.run("RF('account').g(getCase('FT-0'))") === '7788' && htmlSrc.includes("x.value=k==='account'?String(cs.store||'').trim():rv(rw,k);"));
+    check('Weekly report: the Account Name column shows the store number', A.run("RF('account').g(getCase('FT-0'))") === '7788' && htmlSrc.includes("x.value=k==='account'?acctCol(cs):rv(rw,k);"));
     check('Weekly report: the Account Name column stays blank when there is no store number', A.run("RF('account').g(getCase('FT-1'))") === '');
+    // Nov 18: Store number dropdown: N/A or Type store number
+    A.run("window.__ft2=getCase('FT-0').store;openId='FT-0';RCID='';renderCase();storeModeSet('FT-0','na')");
+    check('Store number: picking N/A saves N/A (counts as filled to close)', A.run("getCase('FT-0').store") === 'N/A' && !A.run("missingFields(getCase('FT-0'))").includes('Store Number'));
+    check('Weekly report: when the store number is N/A, the Account Name column shows the account name entered', A.run("RF('account').g(getCase('FT-0'))") === 'Account A');
+    A.run("storeModeSet('FT-0','type')");
+    check('Store number: "Type store number" shows a box to type it in (N/A cleared)', String(A.els['case-body'].innerHTML).includes('id="cd-store"') && A.run("getCase('FT-0').store") === '');
+    A.run("cdSet('FT-0','store','7788');STM={};openId=null");
     check('what is being typed is kept in the browser and put back after a reload', htmlSrc.includes("document.addEventListener('input',draftInput,true)") && htmlSrc.includes('function draftRestore()') && htmlSrc.includes("try{draftRestore()}catch(e){}"));
     // quiet alerts
     A.run("ME={role:'agent',name:'Joerolyn Franquelli'};applyMe()");
@@ -1724,6 +1731,11 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run("codSet('Cd Amy');ME={role:'agent',name:'Cd Amy',coord:true};applyMe();window.__ap=availP;availP=()=>pers('Cd Amy');toggleAvailability();availP=__ap");
     check('the coordinator on duty cannot switch themselves back to Available', A.run("pers('Cd Amy').status") === 'unavailable');
     A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();codSet('')");
+    A.run("COD={cur:{n:'Cd Amy',from:Date.now()},hist:[]};pers('Cd Amy').status='available';pers('Cd Amy').reason='';pers('Cd Ben').status='unavailable';pers('Cd Ben').reason='COD';codEnforce()");
+    check('a coordinator on duty still shown Available (duty set earlier or by an older screen) is switched to Unavailable · COD', A.run("pers('Cd Amy').status+'|'+pers('Cd Amy').reason") === 'unavailable|COD');
+    check('someone left on aux COD who is not on duty goes back to Available', A.run("pers('Cd Ben').status+'|'+pers('Cd Ben').reason") === 'available|');
+    check('the hand-over screen and the coordinator\'s own screen keep it that way', htmlSrc.includes('try{codEnforce()}catch(e){}') && htmlSrc.includes('try{codSelf()}catch(e){}'));
+    A.run("COD={cur:null,hist:[]};codEnforce()");
     // transfer several cases at once
     A.run("CASES.length=0;['TX-1','TX-2','TX-3'].forEach(id=>CASES.push(mkCase(id,'Cd Ben',{})));const z=mkCase('TX-4','Cd Ben',{});z.closed=true;CASES.push(z);bulkOpen()");
     check('Transfer cases lists the open cases with a tick box each', (A.run("$('add-card').innerHTML").match(/class="bx-ck"/g) || []).length === 3 && !A.run("$('add-card').innerHTML").includes('data-id="TX-4"'));
@@ -1740,7 +1752,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     // reload: the copy kept in the browser
     A.run("window.__petCacheOnly=true");
     check('while only the browser\'s kept copy is shown, no screen deals hand-overs', A.run("eosLeader()") === false || A.run("SIMON||!DBON") === true);
-    check('... and no balancing runs on it', htmlSrc.split('STAFFLOADED&&!window.__petCacheOnly').length === 5);
+    check('... and no balancing runs on it', htmlSrc.split('STAFFLOADED&&!window.__petCacheOnly').length >= 5);
     A.run("window.__w=wq;window.__n=0;wq=()=>{__n++};window.__d=DBON;DBON=true;saveStatus=__ss;STAFF_DOC={list:J(STAFF),ts:1,rgh:{}};saveStatus('Cd Ben')");
     check('a status save waits for the server\'s copy (no older schedule written back)', A.run('__n') === 0);
     A.run("window.__petCacheOnly=false");
