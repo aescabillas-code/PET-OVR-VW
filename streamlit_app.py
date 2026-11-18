@@ -36,13 +36,12 @@ SECRET_KEYS = ("MONGO_URI", "MONGODB_URI", "MONGODB_PASSWORD", "MONGO_PASSWORD",
 BOOT_LIMIT = 3000                       # documents per collection sent with the first render
 BOOT_TOP = {"act": 1000, "cases": 1000}  # growing collections: only the newest N (by ts) go with the first render — what the page shows
 VERS_TTL = 2.0                          # seconds the change counters are served from memory before MongoDB is asked again
-READ_CACHE_MAX = 400                    # cached read results (each is dropped as soon as its collection changes)
+READ_CACHE_MAX = 200                    # cached read results (each is dropped as soon as its collection changes)
+READ_CACHE_DOCS = 3000                  # results bigger than this are never cached (a month of history for a report)
 PUSH_MAX_DOCS = 1500                    # a changed collection up to this size is sent along with the change signal
 PUSH_MAX_BYTES = 1_500_000              # ... and only if it is this small as JSON (big answers made slow connections drop)
 PUSH_TOTAL_BYTES = 3_000_000            # all collections sent along with one answer together
 NO_MIRROR = {"att"}                     # read by the page only with a date filter (always from the server): not sent with the page
-WARM_EVERY = 3.0                        # seconds between background refreshes of the copy sent with the page (opening is instant)
-WARM_IDLE = 900.0                       # ... only while someone used the app in the last 15 minutes
 DOWN_GRACE = 8.0                        # seconds MongoDB may be unreachable before the page is told (short hiccups stay silent)
 CHANGE_LOG = 2000                       # recent changes remembered per collection: browsers get only the changed documents
 MAX_ASSET_CHARS = 14_000_000            # ~10 MB file as a base64 data URL (a MongoDB document holds 16 MB)
@@ -389,21 +388,6 @@ class MongoStore(MemStore):
         self._first_ping()
         self._keepalive = threading.Thread(target=self._keepalive_loop, name="pet-mongo-keepalive", daemon=True)
         self._keepalive.start()
-        self.last_use = time.monotonic()
-        self._warm = threading.Thread(target=self._warm_loop, name="pet-mongo-warm", daemon=True)
-        self._warm.start()
-
-    def _warm_loop(self) -> None:
-        """Faster opening (Nov 18): the copy of the data sent with the page is kept ready in the background, so a page that
-        opens gets it from memory instead of waiting for every collection to be read from MongoDB."""
-        while True:
-            time.sleep(WARM_EVERY)
-            if self.down_since is not None or time.monotonic() - self.last_use > WARM_IDLE:
-                continue
-            try:
-                self.snapshot()
-            except Exception:  # noqa: BLE001
-                pass
 
     # ---------------------------------------------------------------- connection resilience
     def _first_ping(self) -> None:
@@ -534,10 +518,21 @@ class MongoStore(MemStore):
             if hit is not None and hit[0] == v:
                 return hit[1]
         val = self._run(load)
+        # Nov 18 (18:35): memory. Results of an older version used to stay in memory until 400 had piled up, and very
+        # large results (a whole week of history for a report: up to 20,000 entries each) were kept too. Several people
+        # opening reports could fill the app's memory, and Streamlit Cloud then restarts the app: every open page
+        # reloads, shows its older kept copy and closes the case being worked on, until the app is back minutes later.
+        try:
+            n = len(val) if isinstance(val, (list, dict)) else 0
+        except Exception:  # noqa: BLE001
+            n = 0
         with self.lock:
+            stale = [k for k, h in self._reads.items() if k[1] == key[1] and h[0] != v]
+            for k in stale:                                      # older copies of this collection are dropped at once
+                self._reads.pop(k, None)
             if len(self._reads) >= READ_CACHE_MAX:
                 self._reads.clear()
-            if int((self._vers or {}).get(key[1], 0)) == v:      # not changed while reading: safe to keep
+            if n <= READ_CACHE_DOCS and int((self._vers or {}).get(key[1], 0)) == v:   # small and not changed while reading
                 self._reads[key] = (v, val)
         return val
 
@@ -638,9 +633,7 @@ class MongoStore(MemStore):
             elif len(docs) >= BOOT_LIMIT:
                 o["partial"] = True                 # too big to mirror: the browser asks the server for this one
             return name, o
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=max(1, min(8, len(names)))) as ex:
-            out = dict(ex.map(one, names))
+        out = dict(one(n) for n in names)          # Nov 19: one after another (no extra threads); unchanged collections come from memory
         with self.lock:
             if tuple(sorted((self._vers or {}).items())) == key:
                 self._snap = (key, out)
@@ -771,8 +764,11 @@ class Bridge:
         key = (c, int(one.get("version") or 0))
         n = self._sizes.get(key)
         if n is None:
-            try:
-                n = len(json.dumps(one["docs"], default=str))
+            try:                                   # an estimate from a sample (serialising every document each time was heavy)
+                docs = one["docs"]
+                vals = list(docs.values()) if isinstance(docs, dict) else list(docs)
+                smp = vals[:: max(1, len(vals) // 40)][:40]
+                n = int(len(json.dumps(smp, default=str)) * (len(vals) / max(1, len(smp)))) if vals else 2
             except Exception:  # noqa: BLE001
                 n = PUSH_MAX_BYTES + 1
             if len(self._sizes) > 500:
@@ -810,10 +806,6 @@ class Bridge:
                     bucket[rid] = {"err": {"code": "unavailable", "message": "Database unavailable", "retry": retry}}
 
     def reply(self, msg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        try:
-            self.store.last_use = time.monotonic()
-        except Exception:  # noqa: BLE001
-            pass
         vers: Optional[Dict[str, int]]
         try:
             vers = self.store.versions()
@@ -928,6 +920,8 @@ def main() -> None:
       #MainMenu, header[data-testid="stHeader"], footer {visibility: hidden; height: 0;}
       .block-container {padding: 0 !important; max-width: 100% !important;}
       iframe {border: 0;}
+      /* Nov 19: while the page (re)loads, its frame shows the app's background colour, not a white flash */
+      iframe, .stApp, [data-testid="stAppViewContainer"], .block-container {background: #f4f7f9 !important;}
       /* the page re-runs quietly in the background: never dim it or show the "running" indicator */
       [data-stale="true"], .stale-element, div[data-testid="stAppViewContainer"] * {transition: none !important;}
       [data-stale="true"], .stale-element {opacity: 1 !important;}

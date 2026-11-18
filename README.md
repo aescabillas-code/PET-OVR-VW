@@ -880,3 +880,110 @@ The schedule that was overwritten must be uploaded again once, after this update
   - case fields (store, model, RITM, case number, SFDC IDs);
   - entries waiting for their button (new checklist item, work/part order, maintenance window dates, revisit), kept
     with the case.
+
+## Fix: entries save as you type, no waiting (Nov 18, 17:30)
+
+- **Saved on every key.** Case fields (store, model, RITM, case number, SFDC IDs), checklist item edits and the
+  scorecard note are handed to the save on every key; there is no pause timer any more. Entries waiting for their
+  button are kept with the case 0.15 s after a key (was 0.4 s).
+- **No waiting for a pause.** A case is saved within 0.25 s of a change, even while typing continues. Before, each key
+  restarted the timer, so nothing was saved until the typing stopped.
+- **Saves never wait behind reads.** A message that carries saves now carries only the saves, so its answer comes
+  straight back.
+- **No flicker back to an older value.** While a save of a case is waiting or on its way, copies of that case coming
+  from the server are held back until every save is done.
+- Local two-screen check: the second screen showed a store number about 0.2 s after the last key.
+
+## Fix: the app resetting to older data and closing the open case (Nov 18, 18:40)
+
+- **Cause found: server memory.** The server kept read results in memory. Results of an older version stayed until 400
+  had piled up, and very large results (a week of history for a report, up to 20,000 entries each) were kept too.
+  With several people opening reports, the app's memory filled up and Streamlit Cloud restarted the app. Every open
+  page then reloaded, showed its older kept copy, closed the case being worked on, and the live data came back only
+  when the app was up again, minutes later.
+  - Results with more than 3,000 entries are no longer kept (`READ_CACHE_DOCS`).
+  - An older version of a collection is dropped as soon as a newer one is read.
+  - At most 200 results are kept (was 400).
+  - The size check for pushing data to the browsers now uses a small sample instead of converting a whole collection
+    to text on every change, which also used a lot of memory and processor time.
+- **Smaller report reads.** Reports read the period's history one day per query again. The page sends them 2 at a
+  time, so each answer stays small for the server and for the page.
+- **The open case comes back.** If the page reloads for any reason, the case that was open reopens by itself once the
+  data is there (if it was open in the last 15 minutes and not closed by the user). Its typed entries are kept, as
+  before.
+- Tests: `tests/test_mongo_cache.py` (memory stays bounded) and `tests/reopen_after_reload.js` (new, run like
+  `live_browser.js`).
+
+## Download all data in one click (Nov 18, 20:00)
+
+- Reports → **⬇ Download all data (Excel)** (managers and coordinators) downloads `PAT_All_Data_<date>.xlsx`.
+- **Summary** sheet: when and by whom it was downloaded, and each sheet with its number of records.
+- **One sheet per collection**, every record and every field:
+  - cases, act (case history), att (attendance), config (settings), ann, mentions, acks, seat, avail, acct, seen;
+  - a **Shift schedule (staff)** sheet, one row per person.
+- **Formatting:**
+  - green header row, frozen, with filters;
+  - borders and banded rows;
+  - columns sized to their content;
+  - times as real dates (yyyy-mm-dd hh:mm, local time);
+  - nested values (checklist items, ownership history…) as readable text.
+- **Nothing is cut off.** Big collections are read a month at a time (a day at a time if a month is very large).
+- Each download is logged ("All data downloaded").
+
+## Nov 19 (01:45): Excel download, CSR only, COD approval, passwords, smoother reloads, clear cache
+
+- **Agent productivity & due misses Excel.**
+  - The download waited for every read of the period (up to 50 round trips), which could take very long; it now waits
+    at most 20 s for that data.
+  - A graph that cannot be drawn within 6 s is left out instead of holding the file.
+  - Every cell is now a clean text, number or date (`xv`). A "not a number" or a raw object made Excel repair the file
+    on opening and drop its formatting.
+  - The page may now send 4 small list reads per message (was 2), so report data arrives faster.
+- **CSR only.**
+  - Add Case has a "🧾 CSR only" tick box (case field `csr`).
+  - A CSR only case has no CE arrival time, maintenance window, Lift / Cabling/HOD tick boxes or revisit, and those
+    are not asked for when closing.
+  - Its statuses are Ordered, Escalated, Shipped and Delivered, and the case shows a "CSR only" tag.
+- **Manual transfers need the coordinator on duty's approval.**
+  - A transfer made by hand (Transfer, Next available, or several ticked cases) becomes a request kept with the case
+    (field `xreq`). The case shows "⏳ Waiting for approval", and the person who asked can cancel it.
+  - The coordinator on duty gets a notice (bottom right, with a sound) listing each request with Approve, Reject and
+    Open case.
+  - Approved: the case moves to the person asked for (or the next available agent).
+  - Rejected: it stays where it was.
+  - Both are written in the case history, and the person who asked gets a message.
+  - Without a coordinator on duty, or when the coordinator on duty transfers, it happens at once as before. Automatic
+    hand-overs and balancing are unchanged.
+- **Clear password works.** Every browser used to merge its own older copy of the passwords back in and save it again,
+  so a cleared password came back a few seconds later. The database copy now decides; this browser's copy is used
+  only right after a change made here, or when the database has none yet.
+- **Realtime saving: old conflicting code removed.** The Nov 17 draft keeper still put back case details typed before
+  a reload and saved them again, which could overwrite newer values and log them twice. Case details now save while
+  typing, so the draft keeper is limited to the Add Case form. Unfinished case entries are kept with the case in the
+  database (Nov 18).
+- **Reloads no longer show tiles without cases.**
+  - The copy of the data kept in the browser moved from localStorage to IndexedDB. localStorage holds only about 5 MB
+    of text, so with many cases the copy was too big and dropped.
+  - After a reload the dashboard and cases show at once from this copy, while the live data loads in the background.
+  - The app's frame now shows the app's background colour while loading, instead of a white flash.
+- **Settings → Timezone and Data → "🧹 Clear cache and reload".** It clears this browser's kept copy of the data and
+  other copies of database data, then reloads. It never removes saved data: cases, the history of every action,
+  attendance and settings are in the database. Unsent changes (outbox), the Add Case draft, the sign-in and the theme
+  stay.
+- **Outdated code removed** (never used anywhere): `applySnd`, `bulkList`, `nextId`, `saveAruba`. Functionality is
+  unchanged.
+
+## Nov 19 (02:30): no interruptions while typing; leaner server
+
+- **The open case no longer refreshes while someone types in it.** Every save made while typing came back from the
+  database a moment later. That echo, and each new history line, redrew the whole case under the person typing, so it
+  looked as if the case reloaded and a key could be lost. These updates now wait while the cursor is in a case field
+  and are shown as soon as the field is left (`caseRedraw`). Saving while typing is unchanged.
+- **Leaner server.**
+  - Removed the background thread added on Nov 18 that re-read the data every 3 seconds.
+  - Removed the extra threads used to read collections in parallel. Unchanged collections still come from memory.
+  - Removed the "last use" tracking that only that thread needed.
+  - Less memory and processor work means fewer reasons for Streamlit Cloud to restart the app.
+- Nothing else changed.
+- About page reloads: Streamlit Cloud restarts the app, and every open page reloads, each time new files are pushed to
+  GitHub and when the app runs out of memory. Pushing updates outside working hours avoids the first.
