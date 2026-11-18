@@ -40,6 +40,9 @@ READ_CACHE_MAX = 400                    # cached read results (each is dropped a
 PUSH_MAX_DOCS = 1500                    # a changed collection up to this size is sent along with the change signal
 PUSH_MAX_BYTES = 1_500_000              # ... and only if it is this small as JSON (big answers made slow connections drop)
 PUSH_TOTAL_BYTES = 3_000_000            # all collections sent along with one answer together
+NO_MIRROR = {"att"}                     # read by the page only with a date filter (always from the server): not sent with the page
+WARM_EVERY = 3.0                        # seconds between background refreshes of the copy sent with the page (opening is instant)
+WARM_IDLE = 900.0                       # ... only while someone used the app in the last 15 minutes
 DOWN_GRACE = 8.0                        # seconds MongoDB may be unreachable before the page is told (short hiccups stay silent)
 CHANGE_LOG = 2000                       # recent changes remembered per collection: browsers get only the changed documents
 MAX_ASSET_CHARS = 14_000_000            # ~10 MB file as a base64 data URL (a MongoDB document holds 16 MB)
@@ -386,6 +389,21 @@ class MongoStore(MemStore):
         self._first_ping()
         self._keepalive = threading.Thread(target=self._keepalive_loop, name="pet-mongo-keepalive", daemon=True)
         self._keepalive.start()
+        self.last_use = time.monotonic()
+        self._warm = threading.Thread(target=self._warm_loop, name="pet-mongo-warm", daemon=True)
+        self._warm.start()
+
+    def _warm_loop(self) -> None:
+        """Faster opening (Nov 18): the copy of the data sent with the page is kept ready in the background, so a page that
+        opens gets it from memory instead of waiting for every collection to be read from MongoDB."""
+        while True:
+            time.sleep(WARM_EVERY)
+            if self.down_since is not None or time.monotonic() - self.last_use > WARM_IDLE:
+                continue
+            try:
+                self.snapshot()
+            except Exception:  # noqa: BLE001
+                pass
 
     # ---------------------------------------------------------------- connection resilience
     def _first_ping(self) -> None:
@@ -603,21 +621,26 @@ class MongoStore(MemStore):
         with self.lock:
             if self._snap is not None and self._snap[0] == key:
                 return self._snap[1]                # nothing changed since the last page load: no database round trips
-        def load():
-            out = {}
-            for name in self.db.list_collection_names():
-                if name.startswith("_"):
-                    continue
-                top = BOOT_TOP.get(name)
+        # Faster opening (Nov 18): each collection is cached by its own change counter, so only the collections that
+        # changed are read again (in parallel), not all of them.
+        names = [n for n in self._run(lambda: self.db.list_collection_names()) if not n.startswith("_") and n not in NO_MIRROR]
+
+        def one(name):
+            top = BOOT_TOP.get(name)
+
+            def load():
                 cur = self.db[name].find({}).sort("ts", -1).limit(top) if top else self.db[name].find({}).limit(BOOT_LIMIT)
-                docs = {d["_id"]: {k: v for k, v in d.items() if k not in ("_id", "_updated")} for d in cur}
-                out[name] = {"version": int(vers.get(name, 0)), "docs": docs}
-                if top and len(docs) >= top:
-                    out[name]["top"] = {"ob": "ts", "n": top}   # the newest N only: good for "newest first" views
-                elif len(docs) >= BOOT_LIMIT:
-                    out[name]["partial"] = True     # too big to mirror: the browser asks the server for this one
-            return out
-        out = self._run(load)
+                return {d["_id"]: {k: v for k, v in d.items() if k not in ("_id", "_updated")} for d in cur}
+            docs = self._cached(("boot", name), load)
+            o = {"version": int(vers.get(name, 0)), "docs": dict(docs)}
+            if top and len(docs) >= top:
+                o["top"] = {"ob": "ts", "n": top}   # the newest N only: good for "newest first" views
+            elif len(docs) >= BOOT_LIMIT:
+                o["partial"] = True                 # too big to mirror: the browser asks the server for this one
+            return name, o
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=max(1, min(8, len(names)))) as ex:
+            out = dict(ex.map(one, names))
         with self.lock:
             if tuple(sorted((self._vers or {}).items())) == key:
                 self._snap = (key, out)
@@ -787,6 +810,10 @@ class Bridge:
                     bucket[rid] = {"err": {"code": "unavailable", "message": "Database unavailable", "retry": retry}}
 
     def reply(self, msg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        try:
+            self.store.last_use = time.monotonic()
+        except Exception:  # noqa: BLE001
+            pass
         vers: Optional[Dict[str, int]]
         try:
             vers = self.store.versions()
@@ -819,7 +846,7 @@ class Bridge:
         delta: Dict[str, Any] = {}
         total = 0
         for c, v in (vers or {}).items():
-            if c in have and int(have[c]) != int(v) and not str(c).startswith("_"):
+            if c in have and int(have[c]) != int(v) and not str(c).startswith("_") and c not in NO_MIRROR:
                 hv, cv = int(have[c]), int(v)
                 ids = None
                 if 0 < hv < cv and hasattr(self.store, "changed_since"):

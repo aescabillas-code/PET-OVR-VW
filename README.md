@@ -779,3 +779,32 @@ The schedule that was overwritten must be uploaded again once, after this update
   - shows the store number when there is one;
   - shows the account name entered in the case when the store number is N/A;
   - stays blank when nothing is set.
+
+## Faster opening (Nov 18, 02:35)
+
+- **The data sent with the page is ready in memory.** A background thread on the server refreshes it every 3 seconds
+  while the app is in use (`WARM_EVERY`, `WARM_IDLE`). Opening the app no longer waits for every collection to be read
+  from MongoDB.
+- **Only what changed is read again.** Each collection is cached by its own change counter and changed ones are read in
+  parallel. Before, any single change made the next page open re-read all collections one after another.
+- **Attendance is no longer sent with the page.** The page always reads it from the server with a date filter, so the
+  copy was never used (`NO_MIRROR`). It is also no longer pushed to every browser on each sign-in.
+- **The font no longer holds up the first screen.** The Google font loads in the background.
+- With the kept copy from earlier tonight, a browser that has opened the app before shows the last data immediately,
+  then the live data.
+- Local measurement with 1,500 cases, 3,000 history lines and 4,000 attendance records: cases on screen in 0.5–0.8 s
+  after the page arrives. On Streamlit Cloud, an app that has gone to sleep still needs its wake-up time first; that
+  part can't be changed from the app.
+- Test: `tests/test_mongo_cache.py` (only changed collections re-read; attendance not sent).
+
+## Keep-awake (Nov 18, 08:45)
+
+- `.github/workflows/keep_awake.yml` runs every 3 hours, and from the Actions tab with "Run workflow".
+- It runs `tools/keep_awake.py`, which opens the app in a headless browser.
+  - A plain web request (curl/ping) no longer wakes a Streamlit Cloud app: a sleeping app shows "This app has gone to
+    sleep" and its "Yes, get this app back up!" button has to be clicked in a browser. The script clicks it, waits
+    until the app has loaded, and tries three times before reporting a failure.
+- Setup: add a repository secret `APP_URL` (Settings → Secrets and variables → Actions) with the app's address, e.g.
+  `https://your-app.streamlit.app`.
+- GitHub turns scheduled workflows off after 60 days without commits to the repository. If that happens, re-enable the
+  workflow on the Actions tab.
