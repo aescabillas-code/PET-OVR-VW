@@ -90,7 +90,6 @@ fake.ReturnDocument = types.SimpleNamespace(AFTER=True)
 sys.modules["pymongo"] = fake
 
 import streamlit_app as app  # noqa: E402
-app.WARM_IDLE = -1.0   # no background refresh during these round-trip counts
 
 
 class MongoCache(unittest.TestCase):
@@ -173,6 +172,19 @@ class MongoCache(unittest.TestCase):
         self.assertEqual(sorted(s2["cases"]["docs"]), ["a", "b"])
         self.assertEqual(s2["ann"], s1["ann"])
         self.assertLessEqual(reads, 3)                    # versions + collection names + the one changed collection
+
+    def test_memory_stays_bounded(self):
+        # Nov 18 (18:35): big results are not kept and older versions are dropped at once (memory -> app restarts)
+        for i in range(app.READ_CACHE_DOCS + 5):
+            self.s.db["act"].d["a%05d" % i] = {"_id": "a%05d" % i, "ts": i}
+        self.s._vers = None
+        self.s.list("act", None, False, 0)
+        self.assertFalse([k for k in self.s._reads if k[1] == "act"])
+        app.execute(self.s, "put", {"c": "ann", "id": "x", "data": {"ts": 1}})
+        self.s.list("ann", None, False, 0)
+        app.execute(self.s, "put", {"c": "ann", "id": "y", "data": {"ts": 2}})
+        self.s.list("ann", None, False, 0)
+        self.assertEqual(len([k for k in self.s._reads if k[1] == "ann"]), 1)
 
 
 if __name__ == "__main__":

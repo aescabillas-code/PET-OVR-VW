@@ -25,6 +25,12 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); 
   await p.evaluate(() => { document.getElementById('new-in').focus(); });
   await p.keyboard.type('Check cable'); await p.keyboard.press('Enter'); await p.waitForTimeout(150);
   ok(await p.evaluate(() => document.getElementById('new-in').value) === '', 'a submitted entry (Enter) is not put back after the redraw');
+  // Nov 19: data arriving from the database does not redraw the open case under the person typing
+  await p.click('#cd-model'); await p.keyboard.type('X');
+  const same = await p.evaluate(() => { const e = document.getElementById('cd-model'); e.__mark = 1; caseRedraw(); return document.getElementById('cd-model').__mark === 1 && CRD_PEND === true; });
+  ok(same, 'an update from the database waits while someone types in the case (no redraw under the cursor)');
+  await p.click('#case-body'); await p.waitForTimeout(150);
+  ok(await p.evaluate(() => CRD_PEND === false && document.getElementById('cd-model').__mark !== 1), 'the case is brought up to date as soon as the field is left');
   ok(!errs.length, 'no browser errors ' + errs.join(' | '));
   await b.close();
   console.log(fails ? 'RESULT: FAIL (' + fails + ')' : 'RESULT: PASS'); process.exit(fails ? 1 : 0);

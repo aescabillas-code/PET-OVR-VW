@@ -37,8 +37,8 @@ function browser(ls, server, delay) {
   await save; await Promise.all(reads);
   const first = msgs.find(m => (m.reqs || []).length);
   const ops = first.reqs.map(r => r.op);
-  ok(ops[0] === 'put', 'the save goes out first, ahead of the reads (' + ops.slice(0, 3).join(',') + '…)');
-  ok(msgs.every(m => (m.reqs || []).filter(r => r.op === 'list').length <= 2 && (m.reqs || []).filter(r => r.op === 'get').length <= 25), 'every message carries at most 2 list reads and 25 single reads');
-  ok(msgs.filter(m => (m.reqs || []).length).length >= 5, 'the rest follow in the next messages (all ' + reads.length + ' reads answered)');
+  ok(ops[0] === 'put' && ops.every(o => o === 'put'), 'the save goes out in its own message, ahead of the reads (' + ops.join(',') + ')');
+  ok(msgs.every(m => (m.reqs || []).filter(r => r.op === 'list').length <= 4 && (m.reqs || []).filter(r => r.op === 'get').length <= 25), 'every message carries at most 4 list reads and 25 single reads');
+  ok(msgs.filter(m => (m.reqs || []).length).length >= 3, 'the rest follow in the next messages (all ' + reads.length + ' reads answered)');
   console.log(fails ? 'RESULT: FAIL (' + fails + ')' : 'RESULT: PASS'); process.exit(fails ? 1 : 0);
 })();

@@ -932,7 +932,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run("(()=>{const c=getCase('HO-1'),it=c.items[0];it.rem={at:Date.now()+60000,text:'Call back',fired:false,by:'Haina Azuela',setAt:Date.now()+1000}})()");
     A.run("remCheck()");
     check('a reminder the new owner sets after the hand-over still rings', J(A.run("JSON.stringify(remQueue.map(x=>x.cid).concat(remOpen&&window._p?[window._p.cid]:[]))")).includes('HO-1'));
-    check('a failed first save also releases the case', fs0.includes(".then(()=>pendDone(cur.id),e=>{PEND.delete(cur.id);throw e})"));
+    check('a failed first save also releases the case', fs0.includes(".then(()=>pendDone(cur.id),e=>{SVN[cur.id]=Math.max(0,(SVN[cur.id]||1)-1);PEND.delete(cur.id);throw e})"));
   }
   // ---------- opening another case never shows the first case's typed values (SFDC Case ID, model, ...) ----------
   {
@@ -1767,7 +1767,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('reports count an older case worked on in the period even if it is not among the 1,000 newest on screen', A.run("perfCases().some(c=>c.id==='OLD-9')") && A.run("caseIndex().items.some(it=>it.c.id==='OLD-9'&&it.wd.has('Cd Ben'))"));
     A.run("delete REPCASE['OLD-9'];PD_CACHE.clear();CIX=null");
     check('a second hand-over between the same two people on the same day gets its own history line', htmlSrc.includes("+'_'+(Array.isArray(c.ownh)?c.ownh.length:0)}:null"));
-    check('reports read the period day by day (no 20,000-entry cut-off) and the scorecard and Excel wait for it', htmlSrc.includes("for(let x=a0;x<=a1;x+=7*D)") && htmlSrc.includes("try{await loadRepAct(perfRange()[0]-21*864e5,perfRange()[1])}catch(e){}"));
+    check('reports read the period day by day (no 20,000-entry cut-off) and the scorecard and Excel wait for it', htmlSrc.includes("for(let x=a0;x<=a1;x+=D)") && htmlSrc.includes("try{await Promise.race([loadRepAct(perfRange()[0]-21*864e5,perfRange()[1]),new Promise(r=>setTimeout(r,20000))])}catch(e){}"));
     check('a "⇄ Transfer cases" button sits next to Add Case', htmlSrc.includes('onclick="bulkOpen()"'));
     // reload: the copy kept in the browser
     A.run("window.__petCacheOnly=true");
@@ -1779,7 +1779,49 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     await sleep(1400);
     check('then it is saved', A.run('__n') === 1);
     A.run("wq=__w;DBON=__d;ATT_OFF=false");
+    check('a case field is saved within 0.25 s of a change, also while typing continues (no waiting for a pause)', htmlSrc.includes("PEND.add(c.id);if(ST[c.id])return;ST[c.id]=setTimeout(()=>{ST[c.id]=0;") && htmlSrc.includes("{try{rtSave(t)}catch(x){}}"));
+    check('incoming copies of a case are held back until every save of it is done (no flicker back to an older value)', htmlSrc.includes("function pendDone(id){if(SVN[id]>0)SVN[id]--;if(ST[id]||SVN[id]>0)return;PEND.delete(id);"));
+    check('managers and coordinators get "⬇ Download all data (Excel)" in Reports: every collection, one formatted file', htmlSrc.includes("btn('⬇ Download all data (Excel)','exportAll()'") && htmlSrc.includes("async function exportAll(){if(!isLead())") && htmlSrc.includes("'exportAll']]"));
     check('while the first data loads the counters stay empty (no 0, no loading sign)', htmlSrc.includes("${loadingNow?'&nbsp;':num}"));
+  }
+  // ---------- Nov 19: CSR only, COD approval of manual transfers, passwords, drafts ----------
+  {
+    const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const nowM = A.run('minOf(simNow())');
+    const ag = (name, a, b, extra) => Object.assign({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: 'available' }, extra || {});
+    A.run('STAFF=' + JSON.stringify([ag('Xr Amy', -200, 300, { coord: true }), ag('Xr Ben', -200, 300), ag('Xr Cy', -200, 300)]) + ';ensureMgrs(STAFF);STAFFLOADED=true;SIMON=false;ATT_OFF=true;COD={cur:null,hist:[]};ME={role:"manager",name:"Jeff Bote"};applyMe();CASES.length=0');
+    // CSR only
+    A.run("ADDT='aruba';openAdd()");
+    check('Add Case has a "CSR only" tick box', A.run("$('add-card').innerHTML").includes('id="add-csr"'));
+    A.run("hide('add-modal');CASES.push(mkCase('CSR-1','Xr Ben',{csr:true}));openId='CSR-1';RCID='';renderCase()");
+    { const h = String(A.els['case-body'].innerHTML);
+      check('a CSR only case has no CE arrival time, maintenance window, lift, Cabling/HOD or revisit', !h.includes('CE arrival time') && !h.includes('Maintenance window') && !h.includes('Lift required') && !h.includes('Cabling/HOD') && !h.includes('This case needs a revisit'));
+      check('a CSR only case has the statuses Ordered, Escalated, Shipped and Delivered', ['Ordered', 'Escalated', 'Shipped', 'Delivered'].every(x => h.includes('<option >' + x + '</option>') || h.includes('<option>' + x + '</option>')) && !h.includes('>Tracking Number<') && h.includes('CSR only')); }
+    check('closing a CSR only case does not ask for a maintenance window or CE arrival time', !A.run("missingFields(getCase('CSR-1'))").some(x => /Maintenance|CE Arrival/.test(x)));
+    A.run("CASES.push(mkCase('STD-1','Xr Ben',{}));openId='STD-1';RCID='';renderCase()");
+    check('a normal case keeps everything (CE arrival, maintenance window, revisit, usual statuses)', (h => h.includes('CE arrival time') && h.includes('Maintenance window') && h.includes('>Tracking Number<'))(String(A.els['case-body'].innerHTML)));
+    A.run("closeCase()");
+    // COD approval
+    A.run("codSet('Xr Amy');['XR-1','XR-2','XR-3'].forEach(id=>CASES.push(mkCase(id,'Xr Ben',{})));SIM_USER='Xr Ben'");
+    A.run("doTransfer('XR-1','Xr Cy');doTransfer('XR-2','Xr Cy')");
+    check('a manual transfer becomes a request: the case stays put until the coordinator on duty approves', A.run("getCase('XR-1').owner") === 'Xr Ben' && A.run("getCase('XR-1').xreq&&getCase('XR-1').xreq.to") === 'Xr Cy' && A.run("getCase('XR-1').log.some(l=>l.action==='Transfer requested')"));
+    A.run("SIM_USER='Xr Amy';xreqRender()");
+    check('the coordinator on duty gets a notice with Approve / Reject', A.run("$('xreq-pop').innerHTML").includes('Transfer approval needed (2)') && A.run("$('xreq-pop').innerHTML").includes("xreqApprove('XR-1')"));
+    A.run("xreqApprove('XR-1');xreqReject('XR-2')");
+    check('approved: the case moves to the person asked for', A.run("getCase('XR-1').owner") === 'Xr Cy' && A.run("getCase('XR-1').xreq") === null);
+    check('rejected: the case stays where it was', A.run("getCase('XR-2').owner") === 'Xr Ben' && A.run("getCase('XR-2').xreq") === null && A.run("getCase('XR-2').log.some(l=>l.action==='Transfer rejected')"));
+    A.run("doTransfer('XR-3','Xr Cy')");
+    check('the coordinator on duty\'s own transfers happen at once', A.run("getCase('XR-3').owner") === 'Xr Cy' && !A.run("getCase('XR-3').xreq"));
+    A.run("codSet('');SIM_USER='Xr Ben';doTransfer('XR-2','Xr Cy')");
+    check('without a coordinator on duty a manual transfer happens at once, as before', A.run("getCase('XR-2').owner") === 'Xr Cy');
+    A.run("SIM_USER=ME.name||'Jeff Bote';xreqRender()");
+    // passwords, drafts
+    check('a cleared password stays cleared: the database copy decides (no merging of older browser copies)', htmlSrc.includes("else{PROFILE_HASHES=db;normalizeProfileHashes()}") && !htmlSrc.includes("PROFILE_HASHES={...local,...db}"));
+    A.run("openId='STD-1';show('case-modal')");
+    check('case details are no longer kept in the browser draft (they save while typing; no older copy put back)', A.run("draftWhich()") === '');
+    A.run("hide('case-modal');openId=null;CASES.length=0;ATT_OFF=false");
+    check('Settings has "Clear cache and reload" that keeps unsent changes and saved data', htmlSrc.includes('function clearCache()') && htmlSrc.includes("if(ob!=null)localStorage.setItem('pet_outbox',ob)"));
+    check('Excel cells never get "not a number" or raw objects (Excel would repair the file and drop its formatting)', A.run("[xv(NaN),xv(undefined),xv({a:1}),xv(3)].join('|')") === '—||{"a":1}|3');
   }
   // ---------- Nov 14: closed cases, name merge, regions ----------
   {
