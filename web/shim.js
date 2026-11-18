@@ -54,7 +54,7 @@
       if (!put(keep)) { Object.keys(skip).forEach(function (c) { delete keep[c]; }); if (!put(keep)) localStorage.removeItem(BCACHE); }
     } catch (e) { try { localStorage.removeItem(BCACHE); } catch (e2) {} }
   }
-  function cacheSoon() { if (cacheT) return; cacheT = setTimeout(function () { cacheT = null; cacheSave(); }, 4000); }
+  function cacheSoon() { if (cacheT) return; cacheT = setTimeout(function () { cacheT = null; cacheSave(); }, 20000); }
   try {
     var bc = JSON.parse(localStorage.getItem(BCACHE) || 'null');
     if (bc && bc.boot && bc.vers && Date.now() - (bc.at || 0) < 12 * 3600000) { BOOT = bc.boot; BOOT_OK = true; CACHED = true; VERS = bc.vers; window.__petCacheOnly = true; }
@@ -71,11 +71,17 @@
     /* one message at a time: while the server is still answering the last one, wait (the answer triggers the next send).
        A second message sent too early can cut the first one off on a slow connection. After HOLD ms we send anyway. */
     if (AWAIT && now - AWAIT < HOLD) return;
+    /* Nov 18 (16:00): saves go first and every message stays small. Before, all waiting requests went in one message;
+     * a report reading a whole month made one very large answer that held up the saves behind it (the delay) and
+     * could choke the page (the white screen). Now: every save, then at most 2 list reads and 25 single reads; the
+     * rest follow in the next messages. */
+    var ws = [], ls = [], gs = [];
     Object.keys(PEND).forEach(function (k) {
       var p = PEND[k];
       if (p.after && now < p.after) return;                                       // waiting before trying again
-      if (!p.sent || now - p.sent > 10000) { p.sent = now; reqs.push({ id: p.id, op: p.op, a: p.a }); }
+      if (!p.sent || now - p.sent > 10000) (p.w ? ws : p.op === 'list' ? ls : gs).push(p);
     });
+    ws.concat(ls.slice(0, 2), gs.slice(0, 25)).forEach(function (p) { p.sent = now; reqs.push({ id: p.id, op: p.op, a: p.a }); });
     AWAIT = now;
     send('streamlit:setComponentValue', { value: { cid: CID, tick: ++TICK, reqs: reqs, ack: ACK.splice(0), have: haveVers() }, dataType: 'json' });
   }
@@ -127,14 +133,20 @@
     PEND[id] = p; return true;
   }
   /* changes left unsaved by a previous page (closed or reloaded while the connection was down) are sent once now */
-  function replayOutbox() {
-    var o = obRead(), now = Date.now(), keys = Object.keys(o).filter(function (k) { return k.indexOf(CID + ':') !== 0; });
+  /* Nov 18 (11:45): case history lines (act) and attendance records (att) are never dropped. Each is its own record, so
+   * sending one late cannot overwrite anything newer; before, they were thrown away after 15 minutes without a
+   * connection (or 2 minutes after a reload), and those actions were missing from productivity and the scorecard. */
+  var KEEP = { act: 1, att: 1 }, KEEP_MAX = 7 * 864e5;
+  function keepIt(a) { return !!(a && KEEP[a.c]); }
+  function replayOutbox(mine) {
+    var live = {}; Object.keys(PEND).forEach(function (k) { if (PEND[k].ob) live[PEND[k].ob] = 1; });
+    var o = obRead(), now = Date.now(), keys = Object.keys(o).filter(function (k) { return mine ? (!live[k] && keepIt(o[k] && o[k].a)) : k.indexOf(CID + ':') !== 0; });
     keys.sort(function (x, y) { return (o[x].t || 0) - (o[y].t || 0); });
     if (!keys.length) return;
     var cur = obRead(); keys.forEach(function (k) { delete cur[k]; }); obWrite(cur);   // each one is re-added under this page while it is sent
     keys.forEach(function (k) {
       var e = o[k];
-      if (!e || !e.op || !WRITE_OPS[e.op] || now - (e.t || 0) > 2 * 60000) return;    // too old: newer data may exist
+      if (!e || !e.op || !WRITE_OPS[e.op] || (now - (e.t || 0) > 2 * 60000 && !(keepIt(e.a) && now - (e.t || 0) < KEEP_MAX))) return;    // too old: newer data may exist (case history and attendance are always sent: each entry is its own record)
       if (e.a && (e.a.c === 'config' || e.a.c === 'seat' || e.a.c === 'avail')) return;   // settings (the shift schedule, ...) are never replayed: a newer copy may have been saved since (Nov 17)
       rpc(e.op, e.a).then(function () { try { bump(e.a.c); } catch (x) {} }, function () {});
     });
@@ -143,11 +155,12 @@
     var now = Date.now();
     Object.keys(PEND).forEach(function (k) {
       var p = PEND[k];
-      if (now > p.due) { delete PEND[k]; obDel(p); p.reject(mkErr('Cannot reach the database', 'unavailable')); }
+      if (now > p.due) { delete PEND[k]; if (!keepIt(p.a)) obDel(p); p.reject(mkErr('Cannot reach the database', 'unavailable')); }   // case history / attendance stay in the outbox and are sent later
     });
     flush();
   }
   setInterval(beat, POLL);
+  setInterval(function () { if (SYNC && !DOWN) try { replayOutbox(true); } catch (e) {} }, 60000);   // history/attendance left over from a long outage
   /* coming back to the tab (browsers slow timers down in background tabs): ask for the latest at once */
   function wake() { if (!SYNC) return; AWAIT = 0; flush(); }
   try { document.addEventListener('visibilitychange', function () { if (!document.hidden) wake(); }); window.addEventListener('focus', wake); window.addEventListener('online', wake); } catch (e) {}   // idle heartbeat: one quiet rerun every few seconds; saves go out immediately (kick)
@@ -346,8 +359,8 @@
       else if (DOWN || waiting) t = '⏳ Reconnecting to the database — your changes are kept and will save automatically';
       else if (ERR) { t = '❌ Storage error — changes may not be saved'; bg = '#b91c1c'; }
       else if (STORE === 'memory') t = '⚠ MongoDB not connected — data is NOT saved';
-      /* Nov 18: a hiccup of a few seconds is not shown (it fixes itself); the notice appears only if it lasts */
-      if (t && t !== shown) { if (t !== pend) { pend = t; pendAt = now; } if (now - pendAt < (t.indexOf('Reconnecting') >= 0 ? 45000 : 6000)) return; } else pend = '';   // reconnecting happens quietly in the background; it is shown only if it lasts
+      /* Nov 18: connection trouble is handled quietly in the background; a notice appears only if it lasts more than a minute */
+      if (t && t !== shown) { if (t !== pend) { pend = t; pendAt = now; } if (now - pendAt < (t.indexOf('MongoDB not connected') >= 0 ? 6000 : 60000)) return; } else pend = '';   // reconnecting happens quietly in the background; it is shown only if it lasts
       if (t === shown) return;
       shown = t;
       if (!t) { if (pill) pill.style.display = 'none'; return; }
