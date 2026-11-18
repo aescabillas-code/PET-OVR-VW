@@ -90,6 +90,7 @@ fake.ReturnDocument = types.SimpleNamespace(AFTER=True)
 sys.modules["pymongo"] = fake
 
 import streamlit_app as app  # noqa: E402
+app.WARM_IDLE = -1.0   # no background refresh during these round-trip counts
 
 
 class MongoCache(unittest.TestCase):
@@ -158,6 +159,20 @@ class MongoCache(unittest.TestCase):
         s2 = self.s.snapshot()
         self.assertEqual(sorted(s2["cases"]["docs"]), ["a", "b"])
         self.assertEqual(s2["cases"]["version"], self.s.versions()["cases"])
+
+    def test_opening_rereads_only_what_changed_and_skips_attendance(self):
+        app.execute(self.s, "put", {"c": "cases", "id": "a", "data": {"ts": 1}})
+        app.execute(self.s, "put", {"c": "ann", "id": "x", "data": {"ts": 1}})
+        app.execute(self.s, "put", {"c": "att", "id": "t", "data": {"ts": 1}})
+        s1 = self.s.snapshot()
+        self.assertNotIn("att", s1)                       # read with a date filter only: never sent with the page
+        app.execute(self.s, "put", {"c": "cases", "id": "b", "data": {"ts": 2}})
+        n = CALLS["n"]
+        s2 = self.s.snapshot()
+        reads = CALLS["n"] - n
+        self.assertEqual(sorted(s2["cases"]["docs"]), ["a", "b"])
+        self.assertEqual(s2["ann"], s1["ann"])
+        self.assertLessEqual(reads, 3)                    # versions + collection names + the one changed collection
 
 
 if __name__ == "__main__":
