@@ -42,23 +42,28 @@
   /* Nov 18: the last data this browser saw is kept in its storage. When the page reloads (Streamlit reconnecting, a
    * refresh), it is shown straight away instead of zeros, and replaced as soon as the server's copy arrives.
    * While only this copy is shown (window.__petCacheOnly), the app moves no cases on its own. */
-  var BCACHE = 'pet_boot_cache', CACHED = false, cacheT = null;
-  var cacheSig = '';
+  /* Nov 19: the kept copy lives in IndexedDB (was localStorage). localStorage holds about 5 MB as text, so with many cases
+   * the copy was too big and dropped, and after a reload the dashboard showed only the tiles and no cases until the
+   * server answered. IndexedDB has room for it and stores it without turning it into text (no stutter). */
+  var BCACHE = 'pet_boot_cache', CACHED = false, cacheT = null, cacheSig = '', IDBN = 'pet_cache', IDBS = 'kv';
+  function idb() { return new Promise(function (res, rej) { try { var r = indexedDB.open(IDBN, 1); r.onupgradeneeded = function () { r.result.createObjectStore(IDBS); }; r.onsuccess = function () { res(r.result); }; r.onerror = function () { rej(r.error); }; } catch (e) { rej(e); } }); }
+  function idbGet(k) { return idb().then(function (d) { return new Promise(function (res) { try { var q = d.transaction(IDBS, 'readonly').objectStore(IDBS).get(k); q.onsuccess = function () { res(q.result); }; q.onerror = function () { res(null); }; } catch (e) { res(null); } }); }).catch(function () { return null; }); }
+  function idbPut(k, v) { return idb().then(function (d) { return new Promise(function (res) { try { var t = d.transaction(IDBS, 'readwrite'); t.objectStore(IDBS).put(v, k); t.oncomplete = function () { res(true); }; t.onerror = function () { res(false); }; } catch (e) { res(false); } }); }).catch(function () { return false; }); }
+  window.__petCacheClear = function () { try { localStorage.removeItem(BCACHE); } catch (e) {} return idb().then(function (d) { return new Promise(function (res) { try { var t = d.transaction(IDBS, 'readwrite'); t.objectStore(IDBS).clear(); t.oncomplete = function () { res(true); }; t.onerror = function () { res(false); }; } catch (e) { res(false); } }); }).catch(function () { return false; }); };
   function cacheSave() {
     if (!BOOT_OK || CACHED) return;
     try {
       var sig = JSON.stringify(VERS); if (sig === cacheSig) return; cacheSig = sig;   // only when something changed
-      var keep = {}, skip = { act: 1, att: 1, mentions: 1 };
+      var keep = {};
       Object.keys(BOOT).forEach(function (c) { var b = BOOT[c]; if (b && !b.partial && b.docs && c.charAt(0) !== '_' && !/^assets/.test(c)) keep[c] = b; });
-      var put = function (o) { var j = JSON.stringify({ at: Date.now(), vers: VERS, boot: o }); if (j.length > 3500000) return false; localStorage.setItem(BCACHE, j); return true; };
-      if (!put(keep)) { Object.keys(skip).forEach(function (c) { delete keep[c]; }); if (!put(keep)) localStorage.removeItem(BCACHE); }
-    } catch (e) { try { localStorage.removeItem(BCACHE); } catch (e2) {} }
+      idbPut('boot', { at: Date.now(), vers: VERS, boot: keep });
+      try { localStorage.removeItem(BCACHE); } catch (e) {}                       // the old text copy is no longer used
+    } catch (e) {}
   }
   function cacheSoon() { if (cacheT) return; cacheT = setTimeout(function () { cacheT = null; cacheSave(); }, 20000); }
-  try {
-    var bc = JSON.parse(localStorage.getItem(BCACHE) || 'null');
-    if (bc && bc.boot && bc.vers && Date.now() - (bc.at || 0) < 12 * 3600000) { BOOT = bc.boot; BOOT_OK = true; CACHED = true; VERS = bc.vers; window.__petCacheOnly = true; }
-  } catch (e) {}
+  function cacheUse(bc) { if (!BOOT_OK && bc && bc.boot && bc.vers && Date.now() - (bc.at || 0) < 12 * 3600000) { BOOT = bc.boot; BOOT_OK = true; CACHED = true; VERS = bc.vers; window.__petCacheOnly = true; return true; } return false; }
+  try { cacheUse(JSON.parse(localStorage.getItem(BCACHE) || 'null')); } catch (e) {}   // an older text copy, if there is one
+  var CACHE_P = CACHED ? Promise.resolve(true) : idbGet('boot').then(function (bc) { try { return cacheUse(bc); } catch (e) { return false; } });
   try { document.addEventListener('visibilitychange', function () { if (document.hidden) cacheSave(); }); window.addEventListener('pagehide', cacheSave); } catch (e) {}
 
   function send(type, extra) { try { window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, extra || {}), '*'); } catch (e) {} }
@@ -73,7 +78,7 @@
     if (AWAIT && now - AWAIT < HOLD) return;
     /* Nov 18 (16:00): saves go first and every message stays small. Before, all waiting requests went in one message;
      * a report reading a whole month made one very large answer that held up the saves behind it (the delay) and
-     * could choke the page (the white screen). Now: every save, then at most 2 list reads and 25 single reads; the
+     * could choke the page (the white screen). Now: every save, then at most 4 list reads and 25 single reads; the
      * rest follow in the next messages. */
     var ws = [], ls = [], gs = [];
     Object.keys(PEND).forEach(function (k) {
@@ -81,7 +86,8 @@
       if (p.after && now < p.after) return;                                       // waiting before trying again
       if (!p.sent || now - p.sent > 10000) (p.w ? ws : p.op === 'list' ? ls : gs).push(p);
     });
-    ws.concat(ls.slice(0, 2), gs.slice(0, 25)).forEach(function (p) { p.sent = now; reqs.push({ id: p.id, op: p.op, a: p.a }); });
+    /* a message with saves carries only the saves, so its answer comes straight back (no waiting behind reads) */
+    (ws.length ? ws : ls.slice(0, 4).concat(gs.slice(0, 25))).forEach(function (p) { p.sent = now; reqs.push({ id: p.id, op: p.op, a: p.a }); });
     AWAIT = now;
     send('streamlit:setComponentValue', { value: { cid: CID, tick: ++TICK, reqs: reqs, ack: ACK.splice(0), have: haveVers() }, dataType: 'json' });
   }
@@ -326,7 +332,7 @@
     use: async function (name) {
       if (name === 'db') {
         if (window.parent === window) return null;                       // opened outside Streamlit: local mode
-        if (!probe) probe = CACHED ? Promise.resolve(true) : READY.then(function () { return true; });   // Nov 18: with a kept copy the page starts at once      // never fall back to local mode just because the first connection is slow (the status badge says when it is not connected)
+        if (!probe) probe = CACHED ? Promise.resolve(true) : Promise.race([READY.then(function () { return true; }), CACHE_P.then(function (ok) { return ok ? true : READY.then(function () { return true; }); })]);   // Nov 18: with a kept copy the page starts at once      // never fall back to local mode just because the first connection is slow (the status badge says when it is not connected)
         return (await probe) ? DB : null;
       }
       if (name === 'user') return USER;
