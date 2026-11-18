@@ -31,6 +31,11 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); 
   await p.evaluate(() => addItem('PET-7')); await p.waitForTimeout(600);
   const d2 = await p.evaluate(() => ({ items: getCase('PET-7').items.length, dft: getCase('PET-7').dft }));
   ok(d2.items === n0.items + 1 && d2.dft && !d2.dft.f['new-in'] && d2.dft.f['wo-tid'] === 'T-100', 'the Add button works as before and the kept copy of that entry is cleared');
+  // editing a checklist item saves the new text while typing; the history line is written when the box is left
+  await p.evaluate(() => { editing = getCase('PET-7').items[0].id; renderCase(); }); await p.waitForTimeout(100);
+  await p.fill('#edit-in', 'Call the site manager'); await p.waitForTimeout(700);
+  const ed = await p.evaluate(() => ({ t: getCase('PET-7').items[0].text, log: getCase('PET-7').log.filter(l => l.action === 'Item edited').length }));
+  ok(ed.t === 'Call the site manager' && ed.log === 0, 'an edited checklist item is saved while typing, quietly ' + JSON.stringify(ed));
   await p.evaluate(() => closeCase());
   ok(!errs.length, 'no browser errors ' + errs.join(' | '));
   await b.close();

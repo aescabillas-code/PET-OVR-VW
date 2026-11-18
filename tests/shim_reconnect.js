@@ -55,13 +55,15 @@ function makeServer() {
   // a page closed while a save was still waiting: the next page sends it
   ls.pet_outbox = JSON.stringify({ 'cOLD:7': { op: 'put', a: { c: 'cases', id: 'PET-2', data: { y: 2 } }, t: Date.now() - 1000 },
                                    'cOLD:8': { op: 'put', a: { c: 'cases', id: 'PET-OLD', data: { y: 0 } }, t: Date.now() - 3600000 },
-                                   'cOLD:9': { op: 'put', a: { c: 'config', id: 'staff', data: { list: ['old schedule'] } }, t: Date.now() - 1000 } });
+                                   'cOLD:9': { op: 'put', a: { c: 'config', id: 'staff', data: { list: ['old schedule'] } }, t: Date.now() - 1000 },
+                                   'cOLD:10': { op: 'put', a: { c: 'act', id: 'act-old', data: { case: 'PET-2', action: 'Model number updated', by: 'Amy', ts: Date.now() - 3600000 } }, t: Date.now() - 3600000 } });
   const S2 = makeServer(); S2.down = false; S2.docs = S.docs; S2.ver = S.ver;
   browser(ls, m => S2.fn(m));
   await sleep(2500);
   ok(S2.docs['PET-2'] && S2.docs['PET-2'].y === 2, 'a change left unsaved by a closed page is saved by the next page');
   ok(!S2.docs['PET-OLD'], 'very old leftovers are not replayed (newer data may exist)');
   ok(!S2.docs['staff'], 'a settings save left by a closed page (e.g. an old shift schedule) is never replayed');
+  ok(S2.docs['act-old'] && S2.docs['act-old'].action === 'Model number updated', 'a case history line left unsaved an hour ago is still saved (never dropped: needed for productivity)');
   ok(!ls.pet_outbox, 'outbox emptied after replay');
   // realtime: a change made elsewhere arrives as a small delta and shows without a refresh (no full re-read)
   {

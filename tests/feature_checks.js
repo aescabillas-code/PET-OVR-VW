@@ -1737,17 +1737,37 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('the hand-over screen and the coordinator\'s own screen keep it that way', htmlSrc.includes('try{codEnforce()}catch(e){}') && htmlSrc.includes('try{codSelf()}catch(e){}'));
     A.run("COD={cur:null,hist:[]};codEnforce()");
     // transfer several cases at once
-    A.run("CASES.length=0;['TX-1','TX-2','TX-3'].forEach(id=>CASES.push(mkCase(id,'Cd Ben',{})));const z=mkCase('TX-4','Cd Ben',{});z.closed=true;CASES.push(z);bulkOpen()");
-    check('Transfer cases lists the open cases with a tick box each', (A.run("$('add-card').innerHTML").match(/class="bx-ck"/g) || []).length === 3 && !A.run("$('add-card').innerHTML").includes('data-id="TX-4"'));
-    A.run("bulkFilter('tx-2');bulkAll(true)");
-    check('search + "Select all shown" ticks only what is shown', A.run("[...BULKX.sel].join()") === 'TX-2');
-    A.run("bulkTog('TX-1',true);bulkTog('TX-4',true);bulkGo('Cd Cy')");
-    check('several cases move to the chosen person in one go (closed ones never move)', A.run("['TX-1','TX-2','TX-3','TX-4'].map(i=>getCase(i).owner).join()") === 'Cd Cy,Cd Cy,Cd Ben,Cd Ben');
-    A.run("bulkOpen();bulkTog('TX-3',true);bulkGo('__next')");
+    A.run("CASES.length=0;['TX-1','TX-2','TX-3'].forEach(id=>CASES.push(mkCase(id,'Cd Ben',{})));const z=mkCase('TX-4','Cd Ben',{});z.closed=true;CASES.push(z);TAB='all';render();SELX=null;bulkOpen()");
+    { const rows = A.run("$('rows').innerHTML"); const ticks = (rows.match(/onchange="selTog\('([^']+)'/g) || []).map(x => x.slice(18, -1)).sort().join();
+      check('Transfer cases puts a tick box beside each open case in the list itself (not on closed ones)', ticks === 'TX-1,TX-2,TX-3' && A.run("$('sel-bar').innerHTML").includes('case(s) selected')); }
+    A.run("selTog('TX-1',true);selTog('TX-2',true);selTog('TX-4',true);bulkGo('Cd Cy')");
+    check('several ticked cases move to the chosen person in one go (closed ones never move)', A.run("['TX-1','TX-2','TX-3','TX-4'].map(i=>getCase(i).owner).join()") === 'Cd Cy,Cd Cy,Cd Ben,Cd Ben');
+    check('after the transfer the tick boxes go away', A.run("SELX") === null && !A.run("$('rows').innerHTML").includes('selTog('));
+    A.run("bulkOpen();selPage(true)");
+    check('"Select all on this page" ticks every open case shown', A.run("[...SELX.ids].sort().join()") === 'TX-1,TX-2,TX-3');
+    A.run("SELX.ids.clear();selTog('TX-3',true);bulkGo('__next')");
     check('"Next available agent" picks someone for each case', A.run("getCase('TX-3').owner") !== 'Cd Ben');
-    A.run("ME={role:'agent',name:'Cd Cy'};applyMe();bulkOpen()");
-    check('an agent sees only their own open cases', (A.run("$('add-card').innerHTML").match(/data-id="([^"]+)"/g) || []).map(x => x.slice(9, -1)).sort().join() === 'TX-1,TX-2' + (A.run("getCase('TX-3').owner") === 'Cd Cy' ? ',TX-3' : ''));
-    A.run("hide('add-modal');ME={role:'manager',name:'Jeff Bote'};applyMe()");
+    A.run("ME={role:'agent',name:'Cd Cy'};applyMe();SELX=null;bulkOpen()");
+    { const rows = A.run("$('rows').innerHTML"); const ticks = (rows.match(/onchange="selTog\('([^']+)'/g) || []).map(x => x.slice(18, -1)).sort().join();
+      check('an agent gets tick boxes only on their own open cases', ticks === 'TX-1,TX-2' + (A.run("getCase('TX-3').owner") === 'Cd Cy' ? ',TX-3' : '')); }
+    A.run("SELX=null;TAB='active';ME={role:'manager',name:'Jeff Bote'};applyMe()");
+    // Nov 18 (10:30): ownership history and the scorecard
+    A.run("(()=>{const n=Date.now(),c=mkCase('OH-1','Cd Ben',{});c.log=[{ts:n-10*86400000,action:'Case created',by:'Cd Ben',details:''}];c.ts=n;c.credit=null;c.ownh=null;CASES.push(c)})()");
+    check('a case never handed over counts as received when it was created, not when it was last updated', Math.abs(A.run("credOf(getCase('OH-1')).at") - (Date.now() - 10 * 86400000)) < 5000);
+    A.run("reassign(getCase('OH-1'),'Cd Cy','test')");
+    check('the first owner\'s entry in the ownership history starts when the case was created', Math.abs(A.run("getCase('OH-1').ownh[0].at") - (Date.now() - 10 * 86400000)) < 5000 && Math.abs(A.run("getCase('OH-1').credit.at") - (Date.now() - 10 * 86400000)) < 5000);
+    A.run("(()=>{const n=Date.now(),c=mkCase('OH-2','Cd Cy',{});c.items=[{id:'r1',text:'Call the site',done:false,rem:{at:n-3600000,fired:true}}];c.ownh=[{n:'Cd Off',at:n-36000000},{n:'Cd Cy',at:n-600000}];c.credit={n:'Cd Off',at:n-36000000};CASES.push(c);STAFF.push(" + JSON.stringify(ag('Cd Off', -600, -300)) + ");ensureMgrs(STAFF)})()");
+    { const e = A.run("JSON.stringify(dueEvents(1,Infinity).filter(e=>e.c.id==='OH-2').map(e=>({own:e.own,eosOf:e.eosOf,st:e.st})))");
+      const x = JSON.parse(e)[0] || {};
+      check('a reminder that fell due after the owner\'s end of shift counts for the agent who received the case next', x.own === 'Cd Cy' && x.eosOf === 'Cd Off' && Math.abs(x.st - (Date.now() - 600000)) < 5000); }
+    check('a late end-of-shift hand-over says when the shift ended and that nobody was available then', htmlSrc.includes('nobody was available then: case handed over to'));
+    A.run("CASES.length=0;STAFF=STAFF.filter(p=>p.name!=='Cd Off')");
+    // Nov 18 (11:45): reports include cases outside the 1,000 newest kept on screen, and every hand-over is logged
+    A.run("(()=>{const n=Date.now(),c=caseFromDoc('OLD-9',{owner:'Cd Ben',ts:n-40*86400000,items:[]});c.log=[{ts:n-3600000,action:'Model number updated',by:'Cd Ben',details:'x',d:''}];REPCASE['OLD-9']=c;PD_CACHE.clear();CIX=null})()");
+    check('reports count an older case worked on in the period even if it is not among the 1,000 newest on screen', A.run("perfCases().some(c=>c.id==='OLD-9')") && A.run("caseIndex().items.some(it=>it.c.id==='OLD-9'&&it.wd.has('Cd Ben'))"));
+    A.run("delete REPCASE['OLD-9'];PD_CACHE.clear();CIX=null");
+    check('a second hand-over between the same two people on the same day gets its own history line', htmlSrc.includes("+'_'+(Array.isArray(c.ownh)?c.ownh.length:0)}:null"));
+    check('reports read the period day by day (no 20,000-entry cut-off) and the scorecard and Excel wait for it', htmlSrc.includes("for(let x=a0;x<=a1;x+=7*D)") && htmlSrc.includes("try{await loadRepAct(perfRange()[0]-21*864e5,perfRange()[1])}catch(e){}"));
     check('a "⇄ Transfer cases" button sits next to Add Case', htmlSrc.includes('onclick="bulkOpen()"'));
     // reload: the copy kept in the browser
     A.run("window.__petCacheOnly=true");
@@ -1759,7 +1779,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     await sleep(1400);
     check('then it is saved', A.run('__n') === 1);
     A.run("wq=__w;DBON=__d;ATT_OFF=false");
-    check('loading shows … in the counters instead of 0', htmlSrc.includes("loadingNow?'<span class=\"opacity-40\" title=\"Loading…\">…</span>':num"));
+    check('while the first data loads the counters stay empty (no 0, no loading sign)', htmlSrc.includes("${loadingNow?'&nbsp;':num}"));
   }
   // ---------- Nov 14: closed cases, name merge, regions ----------
   {
