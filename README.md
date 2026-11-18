@@ -808,3 +808,75 @@ The schedule that was overwritten must be uploaded again once, after this update
   `https://your-app.streamlit.app`.
 - GitHub turns scheduled workflows off after 60 days without commits to the repository. If that happens, re-enable the
   workflow on the Actions tab.
+
+## Fix: ownership history and scorecard timing; tick boxes in the case list (Nov 18, 10:30)
+
+- **"Received" time of a case.** A case that had not been handed over yet used its last-update time as the time its
+  first owner received it. So its "received" day moved every time the case was updated, and the first entry of the
+  ownership history (written at the first hand-over) carried that wrong time. Now it is the earliest known time of the
+  case: its first history line, or any recorded hand-over (`caseStart`, `credOf`, `ownTimeline`). Cases already
+  stored are read correctly too; nothing has to be changed in the database.
+- **Due reminders after end of shift.** When an agent reaches EOS and nobody is available, their cases stay with them
+  until the first agent comes online (the hand-over runs in the open PAT screens). A reminder that fell due in that
+  gap used to count as a due miss for the agent who had already gone home.
+  - Now it counts for the agent who received the case next, timed from when they received it.
+  - If the departed owner acknowledged it first, it stays with them.
+  - The Due reminders table explains it: "Due after X's end of shift: counted for Y from when they received the case".
+- **Clearer history line.** A hand-over made long after EOS now reads: "X reached end of shift (EOS) at <date, time>;
+  nobody was available then: case handed over to Y, the first agent available".
+- **Tick boxes beside each case.** "⇄ Transfer cases" now puts a tick box at the start of every open case row in the
+  PET Cases list (agents: their own cases).
+  - A blue bar above the list shows how many are selected, with "Select all on this page", Clear, "Transfer to" and
+    Transfer.
+  - Ticking a box does not open the case.
+  - "✕ Done selecting" removes the tick boxes. The separate pop-up list is gone.
+
+## Fix: every action is saved and counted in productivity, due misses and the scorecard (Nov 18, 11:45)
+
+- **History lines and attendance are never dropped.** Case history lines (`act`) and attendance records (`att`) that
+  could not be saved right away (connection or database trouble) used to be thrown away: after 15 minutes without a
+  connection, or 2 minutes after a page reload.
+  - They now stay in the browser's outbox and are sent as soon as the database answers.
+  - The browser retries every minute and keeps them for up to 7 days.
+  - Each is its own record, so sending one late cannot overwrite anything newer.
+  - Settings and case saves keep the earlier rules.
+- **Reports read the whole period.** The Agent productivity & due misses table, the scorecard, the agent profile and
+  the Excel export now read every history entry of the period from the database, one day at a time. One query used to
+  stop at 20,000 entries, so a busy month lost entries at random.
+  - The scorecard and the Excel export also wait for that data now. Before, only the productivity table loaded it.
+- **Older cases are included.** A screen keeps only the 1,000 newest cases. Cases outside those that were worked on in
+  the period are now read from the database for the reports. Their updates, received cases and due misses count;
+  before, they were left out.
+- **Every hand-over gets its history line.** A second automatic hand-over between the same two people on the same day
+  was taken for a repeat and not logged. Now each one is logged.
+- Nothing else changed.
+
+## Fix: saves without delay, no white-screen hiccup (Nov 18, 16:00)
+
+- **Cause.** The page sent everything it was waiting for in one message to the server. Since 11:45 the reports read a
+  whole month of history (and older cases) that way, which made one very large answer. Saves waited behind it (the
+  delay), and an answer that big could choke the page (the white screen).
+- **Saves first, small messages.** Every message now carries all waiting saves first, then at most 2 list reads and 25
+  single reads. The rest follow in the next messages, so a save is never stuck behind a big read.
+- **Fewer, smaller report reads.** The period's history is read a week per query instead of a day per query. A week
+  that reaches the 20,000-entry cap is read again day by day, so nothing is cut off.
+- **Faster typing saves.** Case fields save 0.3 s after the last key (was 0.5 s).
+- **Less work in the browser.** The kept copy of the data is written to browser storage every 20 s (was 4 s) and when
+  the tab is hidden or closed. Writing it is heavy and could make the page stutter.
+- Test: `tests/shim_batching.js` (new).
+
+## Quiet background work; more entries saved in real time (Nov 18, 16:20)
+
+- **No loading or connection notices for short trouble.** Reconnecting, a slow first answer and a passing storage
+  error are handled in the background. The small notice at the bottom left appears only if the trouble lasts more
+  than a minute. The "MongoDB not connected" warning (a setup problem: nothing is saved) still shows after 6 seconds.
+- **No loading sign in the counters.** While the very first data arrives, the counters stay empty instead of showing
+  "…". A browser that has opened the app before shows its kept copy straight away.
+- **More entries saved while typing.** These save quietly 0.4 s after the last key; the history line or the "Note
+  saved" message still comes once, when the box is left, as before:
+  - editing a checklist item's text;
+  - the scorecard context note.
+- Already saved while typing, unchanged:
+  - case fields (store, model, RITM, case number, SFDC IDs);
+  - entries waiting for their button (new checklist item, work/part order, maintenance window dates, revisit), kept
+    with the case.
