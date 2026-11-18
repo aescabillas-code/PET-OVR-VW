@@ -1,0 +1,27 @@
+name: Keep the app awake
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"      # every 3 hours (UTC); Streamlit Cloud puts apps to sleep after a period with no visits
+  workflow_dispatch: {}          # "Run workflow" button on the Actions tab, to test it by hand
+
+permissions:
+  contents: read
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install a headless browser
+        run: |
+          pip install playwright==1.48.0
+          python -m playwright install --with-deps chromium
+      - name: Open the app (and click "get this app back up" if it is asleep)
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+        run: python tools/keep_awake.py
