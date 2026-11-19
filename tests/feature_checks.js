@@ -451,7 +451,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   check('every update is recorded in the case history', A.run("getCase('MWE-1').log.filter(l=>l.action==='Maintenance window updated').length") === 3);
   const mbU2 = String(A.els['case-body'].innerHTML);
   check('the case shows Original, earlier updates and the Current one', mbU2.includes('Original') && mbU2.includes('Update 1') && mbU2.includes('Update 2') && mbU2.includes('Current'));
-  check('the report keeps the original and lists every update', (() => { const t = String(A.run("mwX(getCase('MWE-1'))")); return t.includes('Original:') && t.includes('Update 1:') && t.includes('Update 3 (current):'); })());
+  check('the weekly report shows only the current maintenance window (no Original / Update tags)', (() => { const t = String(A.run("mwX(getCase('MWE-1'))")), m = A.run("JSON.stringify(mwCur(getCase('MWE-1')))"), cur = JSON.parse(m); return !t.includes('Original') && !t.includes('Update') && !t.includes('\n') && t.startsWith(A.run("xdt(" + cur.s + ")")); })());
   check('closing needs an end time on the current window', J(A.run("JSON.stringify(missingFields(getCase('MWE-1')))")).includes('Maintenance Window end time'));
   // restore the state the next tests expect
   A.run("getCase('MWE-1').mwUp.length=0");
@@ -474,7 +474,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   check('any number of new windows can be added and the newest is current', A.run("getCase('MWE-1').mwUp.length") === 3 && A.run("mwCur(getCase('MWE-1')).s") === A.run("fromLI('2026-11-14T09:00')") && A.run("getCase('MWE-1').mwUp.every(m=>m.add)"));
   check('adding keeps the first window untouched', A.run("getCase('MWE-1').mw.s") === w.s);
   check('every added window is recorded in the history', A.run("getCase('MWE-1').log.filter(l=>l.action==='Maintenance window added').length") === 3);
-  { const t = String(A.els['case-body'].innerHTML), r = String(A.run("mwX(getCase('MWE-1'))")); check('the case and the report list the added windows', t.includes('Window 2') && t.includes('Window 4') && r.includes('Window 2:') && r.includes('Window 4 (current):')); }
+  { const t = String(A.els['case-body'].innerHTML), r = String(A.run("mwX(getCase('MWE-1'))")); check('the case lists the added windows; the report shows only the current one', t.includes('Window 2') && t.includes('Window 4') && !r.includes('Window') && !r.includes('\n')); }
   check('the add button is offered next to Update and Edit', String(A.els['case-body'].innerHTML).includes("mwAdd('MWE-1')"));
   A.run("getCase('MWE-1').mwUp.length=0");
   A.run("closeCase()");
@@ -1759,7 +1759,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run("(()=>{const n=Date.now(),c=mkCase('OH-2','Cd Cy',{});c.items=[{id:'r1',text:'Call the site',done:false,rem:{at:n-3600000,fired:true}}];c.ownh=[{n:'Cd Off',at:n-36000000},{n:'Cd Cy',at:n-600000}];c.credit={n:'Cd Off',at:n-36000000};CASES.push(c);STAFF.push(" + JSON.stringify(ag('Cd Off', -600, -300)) + ");ensureMgrs(STAFF)})()");
     { const e = A.run("JSON.stringify(dueEvents(1,Infinity).filter(e=>e.c.id==='OH-2').map(e=>({own:e.own,eosOf:e.eosOf,st:e.st})))");
       const x = JSON.parse(e)[0] || {};
-      check('a reminder that fell due after the owner\'s end of shift counts for the agent who received the case next', x.own === 'Cd Cy' && x.eosOf === 'Cd Off' && Math.abs(x.st - (Date.now() - 600000)) < 5000); }
+      check('a due miss counts for whoever owned the case when the reminder fell due (not for the next owner)', x.own === 'Cd Off' && !x.eosOf && !x.st); }
     check('a late end-of-shift hand-over says when the shift ended and that nobody was available then', htmlSrc.includes('nobody was available then: case handed over to'));
     A.run("CASES.length=0;STAFF=STAFF.filter(p=>p.name!=='Cd Off')");
     // Nov 18 (11:45): reports include cases outside the 1,000 newest kept on screen, and every hand-over is logged
@@ -1819,6 +1819,13 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('a cleared password stays cleared: the database copy decides (no merging of older browser copies)', htmlSrc.includes("else{PROFILE_HASHES=db;normalizeProfileHashes()}") && !htmlSrc.includes("PROFILE_HASHES={...local,...db}"));
     check('log-in picture: Maricar Dela Cruz (front, green blazer) has her own face, Director with manager access', A.run("seatName('d1')") === 'Maricar Dela Cruz' && A.run("isMgrName('Maricar Dela Cruz')") && A.run("(()=>{const l=ensureMgrs([]);const p=l.find(x=>x.name==='Maricar Dela Cruz');return !!p&&p.role==='Director'&&isMgr(p)&&roleTitle(p.name)==='Director'})()"));
     check('log-in picture: every earlier face is kept, on both pictures (web 1672x941, mobile 937x1678)', ['s1','s2','s3','s4','s5','s6','s7','s8','s9','s10','s11','s12','s13','s14','s15','s16','m1','m2','j1','j2','a1','d1'].every(k => A.run("!!SEAT_GEO_B['" + k + "']")) && A.run("LP_B.w===1672&&LP_B.h===941&&LP_B.mw===937&&LP_B.mh===1678"));
+    // Nov 19 (21:00): canceled cases, ownership timeline for due misses, first log-in
+    A.run("(()=>{const c=mkCase('CN-1','Xr Ben',{});c.cstatus='Canceled';c.mw=null;CASES.push(c)})()");
+    check('the maintenance window is optional when closing a Canceled case', !A.run("missingFields(getCase('CN-1'))").some(x => /Maintenance/.test(x)) && A.run("(()=>{const c=getCase('CN-1');c.cstatus='Resolved';const r=missingFields(c).includes('Maintenance Window');c.cstatus='Canceled';return r})()"));
+    A.run("(()=>{const n=Date.now(),c=mkCase('TL-1','Xr Cy',{});c.ownh=[{n:'Xr Amy',at:n-5*36e5}];c.credit={n:'Xr Amy',at:n-5*36e5};c.log=[{ts:n-3*36e5,action:'Ownership transferred',by:'System',details:'Xr Amy reached end of shift (EOS): case handed over to Xr Ben. Xr Amy → Xr Ben.'},{ts:n-1*36e5,action:'Ownership transferred',by:'System',details:'Balanced. Xr Ben → Xr Cy.'}];CASES.push(c)})()");
+    check('who owned a case when: hand-overs in the case history are included even if the saved ownership list missed them', A.run("(()=>{const tl=ownTimeline(getCase('TL-1')),n=Date.now();return [ownerAt(tl,n-4*36e5),ownerAt(tl,n-2*36e5),ownerAt(tl,n-1000)].join()})()") === 'Xr Amy,Xr Ben,Xr Cy');
+    check('attendance keeps the first log-in of the day: it waits for the attendance list and checks the saved record before writing', htmlSrc.includes("if(DBON&&!GOT.att)return false;") && htmlSrc.includes("if(x&&x.in&&+x.in<=now){ATT[id]=x;return}"));
+    A.run("CASES=CASES.filter(c=>!['CN-1','TL-1'].includes(c.id))");
     A.run("PROFILE_HASHES={};PROFILE_HASHES[profileKey('Xr Ben')]='salt:hash';clrPw('Xr Ben')");
     check('clearing a password leaves an empty entry, so the profile has no password', A.run("profileHashFor('Xr Ben')") === '' && A.run("PROFILE_HASHES[profileKey('Xr Ben')]") === '');
     check('a screen on an older version (merging its own copy into the database copy) cannot bring the cleared password back', A.run("(()=>{const local={},db=J(PROFILE_HASHES);local[profileKey('Xr Ben')]='salt:hash';const merged={...local,...db};return merged[profileKey('Xr Ben')]===''&&!Object.keys(merged).some(k=>db[k]!==merged[k])})()"));
