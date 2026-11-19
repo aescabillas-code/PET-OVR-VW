@@ -1817,6 +1817,12 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run("SIM_USER=ME.name||'Jeff Bote';xreqRender()");
     // passwords, drafts
     check('a cleared password stays cleared: the database copy decides (no merging of older browser copies)', htmlSrc.includes("else{PROFILE_HASHES=db;normalizeProfileHashes()}") && !htmlSrc.includes("PROFILE_HASHES={...local,...db}"));
+    A.run("PROFILE_HASHES={};PROFILE_HASHES[profileKey('Xr Ben')]='salt:hash';clrPw('Xr Ben')");
+    check('clearing a password leaves an empty entry, so the profile has no password', A.run("profileHashFor('Xr Ben')") === '' && A.run("PROFILE_HASHES[profileKey('Xr Ben')]") === '');
+    check('a screen on an older version (merging its own copy into the database copy) cannot bring the cleared password back', A.run("(()=>{const local={},db=J(PROFILE_HASHES);local[profileKey('Xr Ben')]='salt:hash';const merged={...local,...db};return merged[profileKey('Xr Ben')]===''&&!Object.keys(merged).some(k=>db[k]!==merged[k])})()"));
+    A.run("PROFILE_HASHES={};PROFILE_HASHES['Xr Ben']='';PROFILE_HASHES[profileKey('Xr Ben')+' ']='salt:old';normalizeProfileHashes()");
+    check('when two copies of the same profile meet, the cleared one wins', A.run("profileHashFor('Xr Ben')") === '');
+    A.run("PROFILE_HASHES={}");
     A.run("openId='STD-1';show('case-modal')");
     check('case details are no longer kept in the browser draft (they save while typing; no older copy put back)', A.run("draftWhich()") === '');
     A.run("hide('case-modal');openId=null;CASES.length=0;ATT_OFF=false");
