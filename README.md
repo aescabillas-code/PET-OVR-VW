@@ -1005,3 +1005,22 @@ The schedule that was overwritten must be uploaded again once, after this update
 - New face `d1`: **Maricar Dela Cruz**, front row in the green blazer, next to Jeff Bote.
   - Role "Director", with the same access as the managers (`MGR_SEATS_B`, `MGR_ROLES`).
   - Like the managers she is not part of the shift schedule and gets no cases (`isMgr` also recognizes "Director").
+
+## Nov 19 (21:00): canceled cases, weekly maintenance window, first log-in, due misses
+
+- **Canceled cases.** The maintenance window is optional when closing a case with status Canceled (`missingFields`).
+- **Weekly report.** The Maintenance Window column shows only the current window ("start to end"), without the
+  Original / Update / Window tags (`mwX`). The case details still show the full history of the window.
+- **Attendance log-in time.** Only the first log-in of the shift day is recorded.
+  - The record used to be written again whenever the attendance list had not finished loading (right after a reload,
+    or on a second computer), so a later time replaced the first one.
+  - Now it waits for the list and checks the saved record in the database before writing.
+  - Example: a 10 PM shift, first log-in at 10 PM → the log-in time stays 10 PM.
+- **Due misses.**
+  - A miss counts for whoever owned the case when the reminder fell due, compared against when it was acknowledged.
+  - The Nov 18 rule that moved such misses to the next owner is removed; it counted misses for people who did not
+    have the case then.
+  - Who owned the case when now comes from the ownership history saved with the case and also every "Ownership
+    transferred" line in the case history (`ownTimeline`). The saved list could miss hand-overs made by other or
+    older screens.
+- Only these parts changed.
