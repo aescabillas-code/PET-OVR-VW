@@ -996,3 +996,12 @@ The schedule that was overwritten must be uploaded again once, after this update
   - An empty entry in the database now wins over their copy, so nothing is saved back.
 - When two copies of the same profile meet, the cleared one wins (`normalizeProfileHashes`).
 - Setting a new password later works as before. Only the password section changed.
+
+## New log-in picture (Nov 19, 09:00)
+
+- The log-in page uses the new team picture: web 1672×941 and mobile 937×1678 (both WebP, inside `web/pet_station.html`).
+- Every face keeps its seat id, so claimed faces stay claimed and every profile is unchanged. Only the face areas were
+  re-measured for the new pictures (`SEAT_GEO_B`, `LP_B`).
+- New face `d1`: **Maricar Dela Cruz**, front row in the green blazer, next to Jeff Bote.
+  - Role "Director", with the same access as the managers (`MGR_SEATS_B`, `MGR_ROLES`).
+  - Like the managers she is not part of the shift schedule and gets no cases (`isMgr` also recognizes "Director").
