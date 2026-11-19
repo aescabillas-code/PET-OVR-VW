@@ -987,3 +987,12 @@ The schedule that was overwritten must be uploaded again once, after this update
 - Nothing else changed.
 - About page reloads: Streamlit Cloud restarts the app, and every open page reloads, each time new files are pushed to
   GitHub and when the app runs out of memory. Pushing updates outside working hours avoids the first.
+
+## Fix: a cleared profile password stays cleared (Nov 19, 08:20)
+
+- Clearing a password now keeps an empty entry for that profile in `config/profileHashes`, instead of deleting it.
+  - Screens still running an older version merge their own saved copy into the database copy and save the result.
+    With the entry deleted, their old password filled the gap and came back minutes later.
+  - An empty entry in the database now wins over their copy, so nothing is saved back.
+- When two copies of the same profile meet, the cleared one wins (`normalizeProfileHashes`).
+- Setting a new password later works as before. Only the password section changed.
