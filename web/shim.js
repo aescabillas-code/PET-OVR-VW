@@ -45,7 +45,7 @@
   /* Nov 19: the kept copy lives in IndexedDB (was localStorage). localStorage holds about 5 MB as text, so with many cases
    * the copy was too big and dropped, and after a reload the dashboard showed only the tiles and no cases until the
    * server answered. IndexedDB has room for it and stores it without turning it into text (no stutter). */
-  var BCACHE = 'pet_boot_cache', CACHED = false, cacheT = null, cacheSig = '', IDBN = 'pet_cache', IDBS = 'kv';
+  var BCACHE = 'pet_boot_cache' /* old text copy: only removed */, CACHED = false, cacheT = null, cacheSig = '', IDBN = 'pet_cache', IDBS = 'kv';
   function idb() { return new Promise(function (res, rej) { try { var r = indexedDB.open(IDBN, 1); r.onupgradeneeded = function () { r.result.createObjectStore(IDBS); }; r.onsuccess = function () { res(r.result); }; r.onerror = function () { rej(r.error); }; } catch (e) { rej(e); } }); }
   function idbGet(k) { return idb().then(function (d) { return new Promise(function (res) { try { var q = d.transaction(IDBS, 'readonly').objectStore(IDBS).get(k); q.onsuccess = function () { res(q.result); }; q.onerror = function () { res(null); }; } catch (e) { res(null); } }); }).catch(function () { return null; }); }
   function idbPut(k, v) { return idb().then(function (d) { return new Promise(function (res) { try { var t = d.transaction(IDBS, 'readwrite'); t.objectStore(IDBS).put(v, k); t.oncomplete = function () { res(true); }; t.onerror = function () { res(false); }; } catch (e) { res(false); } }); }).catch(function () { return false; }); }
@@ -57,13 +57,12 @@
       var keep = {};
       Object.keys(BOOT).forEach(function (c) { var b = BOOT[c]; if (b && !b.partial && b.docs && c.charAt(0) !== '_' && !/^assets/.test(c)) keep[c] = b; });
       idbPut('boot', { at: Date.now(), vers: VERS, boot: keep });
-      try { localStorage.removeItem(BCACHE); } catch (e) {}                       // the old text copy is no longer used
     } catch (e) {}
   }
   function cacheSoon() { if (cacheT) return; cacheT = setTimeout(function () { cacheT = null; cacheSave(); }, 20000); }
   function cacheUse(bc) { if (!BOOT_OK && bc && bc.boot && bc.vers && Date.now() - (bc.at || 0) < 12 * 3600000) { BOOT = bc.boot; BOOT_OK = true; CACHED = true; VERS = bc.vers; window.__petCacheOnly = true; return true; } return false; }
-  try { cacheUse(JSON.parse(localStorage.getItem(BCACHE) || 'null')); } catch (e) {}   // an older text copy, if there is one
-  var CACHE_P = CACHED ? Promise.resolve(true) : idbGet('boot').then(function (bc) { try { return cacheUse(bc); } catch (e) { return false; } });
+  try { localStorage.removeItem(BCACHE); } catch (e) {}   // frees the space the old text copy took
+  var CACHE_P = idbGet('boot').then(function (bc) { try { return cacheUse(bc); } catch (e) { return false; } });
   try { document.addEventListener('visibilitychange', function () { if (document.hidden) cacheSave(); }); window.addEventListener('pagehide', cacheSave); } catch (e) {}
 
   function send(type, extra) { try { window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, extra || {}), '*'); } catch (e) {} }
@@ -230,6 +229,8 @@
   window.__petRealNames = function (names) { return rpc('real_names', { names: names }, 30000); };
   /* the shift schedule template is the file in the repo (templates/), read by the server on every download */
   window.__petTemplate = function (name) { return rpc('template', { name: name }, 30000); };
+  /* IM•LOGIC bridge: the recorded message thread with IM•LOGIC (pet_bridge/apply_to_pet.py) */
+  window.__bridge = function (op, args) { return rpc(op, args || {}, 20000); };
 
   /* ---------- live updates ---------- */
   var W = [];
