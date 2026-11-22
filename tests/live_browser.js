@@ -7,6 +7,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const A = await open(), B = await open();
   const out = {}; let fails = 0; const check = (n, ok, x) => { console.log((ok ? 'PASS ' : 'FAIL ') + n + (ok ? '' : '  ' + JSON.stringify(x))); if (!ok) fails++; };
   for (const X of [A, B]) await X.f.evaluate(() => { ME = { role: 'manager', name: 'Jeff Bote' }; applyMe(); });
+  // the test database starts empty: put a shift schedule in it (the page no longer saves its built-in sample list, Nov 20)
+  await A.f.evaluate(() => { if (!STAFF.some(p => !isMgr(p))) { STAFF = J(DEMO_STAFF).map(p => { delete p.demo; return p }); ensureMgrs(STAFF); STAFFLOADED = true; saveStaff(true, true); } }); await sleep(2500);
   check('both screens are connected to the shared data', await A.f.evaluate(() => DBON) === true && await B.f.evaluate(() => DBON) === true);
   // case created on A appears on B: measure the delay
   const waitB = async (fn, arg, max = 15000) => { const t = Date.now(); while (Date.now() - t < max) { if (await B.f.evaluate(fn, arg)) return Date.now() - t; await sleep(50); } return -1; };

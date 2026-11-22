@@ -59,6 +59,8 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
 (async () => {
   A = client({ role: 'manager', name: 'Jeff Bote' });
   await A.run('initDb()'); await sleep(2500);
+  // the test database starts empty: put a shift schedule in it (the page itself no longer saves its built-in sample list, Nov 20)
+  A.run("STAFF=J(DEMO_STAFF).map(p=>{delete p.demo;return p});ensureMgrs(STAFF);STAFFLOADED=true;saveStaff(true,true)"); await sleep(1500);
   // test helper: make the cases in the list hand-over cases (they came from an agent whose shift ended a minute ago)
   A.run("window.asHo=f=>CASES.forEach(c=>{if(!c.closed&&c.owner&&c.owner!=='Queue'&&credOf(c).n===c.owner&&!c.xfer){f=f||'Prev Shift';c.credit={n:f,at:Date.now()-36e5};c.xfer={from:f,to:c.owner,at:Date.now()-6e4}}})");
 
@@ -277,8 +279,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   check('stat cards are drawn', ['Total Cases', 'Active Cases', 'Due Reminders', 'Completed Cases'].every(x => String(A.els['stats'].innerHTML).includes(x)));
   check('agent status panel is drawn', String(A.els['agent-sum'].innerHTML).includes('Available') && String(A.els['agent-list'].innerHTML).includes('<table'));
   check('action history is gone', A.run('typeof openHist') === 'undefined' && A.run('typeof renderHist') === 'undefined');
-  const n0 = A.run('ACT.length'); A.run("glog('Schedule changed','x','y');aglog('Announcement published','x','y')");
-  check('general actions are no longer recorded', A.run('ACT.length') === n0);
+  check('general actions are no longer recorded (the old no-op loggers are gone)', A.run('typeof glog') === 'undefined' && A.run('typeof aglog') === 'undefined');
   const fs0 = require('fs').readFileSync(path.join(root, 'web/pet_station.html'), 'utf8');
   check('no action-history button in the page', !/openHist|Action history|hist-modal/i.test(fs0));
   check('frame scrolls inside the app (cases area has its own scroll bar)', fs0.includes('id="cases-scroll"') && fs0.includes('#cases-scroll{overflow:auto'));
@@ -1129,7 +1130,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('the welcome Christmas card has fairy lights too', A.run('xmasCard()').includes('ssn-fairy'));
     A.run("SSN={kind:'christmas',from:'01-01',to:'12-31',tree:true,lights:false}");
     check('fairy lights can be switched off', !A.run('xmasCard()').includes('ssn-fairy'));
-    check('naughty-list Santa pushes the blinking Due tile, waves and says you are being naughty', htmlSrc.includes("document.querySelector('#stats .due-tile')") && A.run('NAUGHTY_MSG[0]').includes('naughty') && htmlSrc.includes('@keyframes tilePush') && A.run('SANTA_SVG').includes('s-arm'));
+    check('naughty-list Santa pushes the blinking Due tile, waves and says you are being naughty', htmlSrc.includes("document.querySelector('#stats .due-tile')") && A.run('NAUGHTY_MSG[0]').includes('naughty') && htmlSrc.includes('@keyframes tileBump') && htmlSrc.includes("tt.classList.add('ssn-bump')") && A.run('SANTA_SVG').includes('s-arm'));
     A.run("SSN=null");
   }
   check('Santa and the reindeer are drawn with shading (3D look) and the lead reindeer has a glowing nose', A.run('SANTA_SVG').includes('url(#ssg-red)') && A.run('SLEIGH_SVG').includes('sl-deer') && A.run('SLEIGH_SVG').includes('rn-glow') && A.run('SSN_DEFS').includes('radialGradient'));
@@ -1779,7 +1780,22 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     await sleep(1400);
     check('then it is saved', A.run('__n') === 1);
     A.run("wq=__w;DBON=__d;ATT_OFF=false");
-    check('a case field is saved within 0.25 s of a change, also while typing continues (no waiting for a pause)', htmlSrc.includes("PEND.add(c.id);if(ST[c.id])return;ST[c.id]=setTimeout(()=>{ST[c.id]=0;") && htmlSrc.includes("{try{rtSave(t)}catch(x){}}"));
+    check('a case field is saved within 0.25 s of a change, also while typing continues (no waiting for a pause)', htmlSrc.includes("PEND.add(c.id);if(ST[c.id])return;const one=c;ST[c.id]=setTimeout(()=>saveNow(one.id,one),250)}") && htmlSrc.includes("{try{rtSave(t)}catch(x){}}"));
+    // Nov 22: a change still waiting for its 0.25 s bundle is sent at once when the page is hidden / closed
+    A.run("window.__w=wq;window.__n=0;wq=()=>{__n++};window.__d=DBON;DBON=true;window.__fc={id:'zzflush',log:[],items:[],sfdc:[]};CASES.push(__fc);queueSave(__fc)");
+    check('a waiting case save is not sent before its 0.25 s bundle', A.run('__n') === 0 && !!A.run('ST[__fc.id]'));
+    A.run('flushSaves()');
+    check('... and is sent at once when the page is hidden or closed (a reload loses no keys)', A.run('__n') === 1 && !A.run('ST[__fc.id]'));
+    await sleep(400);
+    check('... only once', A.run('__n') === 1);
+    A.run("PEND.delete(__fc.id);SVN[__fc.id]=0");
+    // IM•LOGIC messages that came in while PET was closed still go into the case history, once
+    A.run("window.__wa=writeAct;window.__acts=[];writeAct=(e,id)=>__acts.push(id);window.__mt=Date.now()-3*864e5;brpLogIn([{id:'m1',pet:__fc.id,from:'IM',by:'Ana',text:'hello',ts:__mt},{id:'m0',pet:__fc.id,from:'IM',by:'Ana',text:'old',ts:Date.now()-9*864e5}])");
+    check('an IM•LOGIC message from 3 days ago is written to the case history with its own time', A.run("__acts.join()") === 'brm_m1' && A.run("__fc.log.some(e=>e.action==='Message from IM•LOGIC'&&e.ts===__mt)") === true);
+    A.run("ACTIDS.delete('brm_m1');brpLogIn([{id:'m1',pet:__fc.id,from:'IM',by:'Ana',text:'hello',ts:__mt}])");
+    check('... and only once (also when a screen sees it again)', A.run("__acts.length") === 1);
+    A.run("writeAct=__wa;wq=__w;DBON=__d;CASES.splice(CASES.indexOf(__fc),1)");
+    check('an unsent IM•LOGIC message is kept like other unfinished entries', A.run("DFT_IDS.includes('brp-in')") === true);
     check('incoming copies of a case are held back until every save of it is done (no flicker back to an older value)', htmlSrc.includes("function pendDone(id){if(SVN[id]>0)SVN[id]--;if(ST[id]||SVN[id]>0)return;PEND.delete(id);"));
     check('managers and coordinators get "⬇ Download all data (Excel)" in Reports: every collection, one formatted file', htmlSrc.includes("btn('⬇ Download all data (Excel)','exportAll()'") && htmlSrc.includes("async function exportAll(){if(!isLead())") && htmlSrc.includes("'exportAll']]"));
     check('while the first data loads the counters stay empty (no 0, no loading sign)', htmlSrc.includes("${loadingNow?'&nbsp;':num}"));
@@ -1826,6 +1842,12 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('who owned a case when: hand-overs in the case history are included even if the saved ownership list missed them', A.run("(()=>{const tl=ownTimeline(getCase('TL-1')),n=Date.now();return [ownerAt(tl,n-4*36e5),ownerAt(tl,n-2*36e5),ownerAt(tl,n-1000)].join()})()") === 'Xr Amy,Xr Ben,Xr Cy');
     check('attendance keeps the first log-in of the day: it waits for the attendance list and checks the saved record before writing', htmlSrc.includes("if(DBON&&!GOT.att)return false;") && htmlSrc.includes("if(x&&x.in&&+x.in<=now){ATT[id]=x;return}"));
     A.run("CASES=CASES.filter(c=>!['CN-1','TL-1'].includes(c.id))");
+    // Nov 20: the built-in sample schedule (e.g. Lucille Layug) is never shown or saved when the database is on
+    A.run("window.__w9=wq;window.__n9=0;wq=(k,fn)=>{if(k==='staff')__n9++;else return __w9(k,fn)};window.__S9=STAFF;window.__D9=STAFF_DOC;window.__L9=STAFFLOADED;window.__db9=DBON;DBON=true;SIMON=false;STAFF=DEMO_STAFF;STAFF_DOC=null;STAFFLOADED=false;ME={role:'manager',name:'Jeff Bote'};saveStatus('Lucille Layug');saveStaff(true,true)");
+    await sleep(400);
+    check('the sample schedule is never written to the database (a status save before the real schedule arrives does nothing)', A.run('__n9') === 0 && A.run("hasDemo(DEMO_STAFF)"));
+    check('with the database on, the page starts with no sample agents until the real schedule arrives', htmlSrc.includes("dbq=db;DBON=true;if(!STAFFLOADED){STAFF=[];try{ensureMgrs(STAFF)}catch(e){}}") && !htmlSrc.includes("else if(isLead()&&!STAFF_DOC)saveStaff()"));
+    A.run("wq=__w9;STAFF=__S9;STAFF_DOC=__D9;STAFFLOADED=__L9;DBON=__db9");
     A.run("PROFILE_HASHES={};PROFILE_HASHES[profileKey('Xr Ben')]='salt:hash';clrPw('Xr Ben')");
     check('clearing a password leaves an empty entry, so the profile has no password', A.run("profileHashFor('Xr Ben')") === '' && A.run("PROFILE_HASHES[profileKey('Xr Ben')]") === '');
     check('a screen on an older version (merging its own copy into the database copy) cannot bring the cleared password back', A.run("(()=>{const local={},db=J(PROFILE_HASHES);local[profileKey('Xr Ben')]='salt:hash';const merged={...local,...db};return merged[profileKey('Xr Ben')]===''&&!Object.keys(merged).some(k=>db[k]!==merged[k])})()"));

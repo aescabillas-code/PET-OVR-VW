@@ -53,6 +53,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
   const A = client({ role: 'manager', name: 'Jeff Bote' });
   await A.run('initDb()'); await sleep(2500);
+  // the test database starts empty: put a shift schedule in it (the page no longer saves its built-in sample list, Nov 20)
+  A.run("STAFF=J(DEMO_STAFF).map(p=>{delete p.demo;return p});ensureMgrs(STAFF);STAFFLOADED=true;saveStaff(true,true)"); await sleep(1500);
   console.log('A connected to the database:', A.run('DBON'));
   A.run('openAdd()'); A.run("document.getElementById('add-id').value='PET-TEST-1';document.getElementById('add-recv').value='2026-11-06T09:00';document.getElementById('add-hp').checked=true");
   A.run('addCase()'); await sleep(2500);
