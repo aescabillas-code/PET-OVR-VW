@@ -1024,3 +1024,99 @@ The schedule that was overwritten must be uploaded again once, after this update
     transferred" line in the case history (`ownTimeline`). The saved list could miss hand-overs made by other or
     older screens.
 - Only these parts changed.
+
+## Clean-up: outdated code removed (Nov 20)
+
+Removed (not used anywhere; nothing changes for users):
+
+- **Old log-in picture side strips** (`.lext`): two image strips cut from the edges of the previous log-in picture, plus
+  their styles. They had been hidden for good (`display:none!important`) since the picture is extended to the screen
+  edges another way (`.lx`). About 19 KB.
+- **Styles for elements that no longer exist:**
+  - `#tabs` (old tab bar);
+  - `.s-arm2` (second Santa arm);
+  - `.sl-elf` (elf in the sleigh);
+  - `.ssn-pushed` / `.ssn-pushed-r` with `@keyframes tilePush` / `tilePushR` (old naughty-list tile push, replaced by
+    `.ssn-bump`).
+- **Unused JavaScript:**
+  - `relevant()` (old case filter);
+  - `isOn()` (old on-shift check, replaced by `onShiftAt`);
+  - `DEF` (empty demo list);
+  - `NONOTE` (old note switch);
+  - `RT_T` (timer of the old save delay);
+  - `pct()` (unused percent helper in the productivity table).
+- Removed earlier: `applySnd`, `bulkList`, `nextId`, `saveAruba` (Nov 19); the background data thread (Nov 19);
+  the Transfer cases pop-up list (Nov 18).
+
+Still in place, listed for review (each one works and is in use or kept on purpose):
+
+| Item | What it is | Note |
+|---|---|---|
+| `prodCredsOf`, `regionFor`, `sSet`, `setUser` | small helpers | used only by the automated tests |
+| Old text copy reader in `web/shim.js` (`pet_boot_cache`) | reads the kept copy saved before Nov 19 | can go once every browser has opened the Nov 19 version |
+| Seasonal decorations (Christmas, New Year, Valentine's, Halloween; Santa, naughty list) | shown by date, can be turned off in Settings | feature |
+| DIY log-in picture editor | upload a picture and mark faces (Settings) | feature; not needed if only the built-in picture is used |
+| Local storage (`MemStore`) in `streamlit_app.py` | used when MongoDB is not set up, and by the tests | keep |
+| `tools/keep_awake.py`, `.github/workflows/keep_awake.yml` | keep-awake | only if that GitHub workflow is used |
+| `Dockerfile`, `.env.example` | running PAT outside Streamlit Cloud | optional |
+| This README's change history | notes for every update | can be shortened |
+
+## Fix: after a reload the dashboard showed an old sample schedule (e.g. only "Lucille Layug") (Nov 20, 12:10)
+
+- **Cause.** The page starts with a built-in sample schedule (the old demo list, which includes Lucille Layug). With
+  the database on, that list was used until the real schedule arrived:
+  - **Shown:** after a reload or a crash, the dashboard showed the sample agents for a moment.
+  - **Saved:** a status save in that moment (aux, available, sign-in) built the schedule from the sample list and
+    wrote it to the database.
+  - **Saved:** if the schedule document did not come back on one answer, a manager's screen saved the sample list
+    as the schedule. Every screen then showed the old data until someone fixed it.
+- **Fix.**
+  - With the database on, the page starts with no sample agents (only the manager profiles) and waits for the real
+    schedule.
+  - The sample entries are tagged (`demo`). A schedule containing them is never saved (`hasDemo`).
+  - A status save before the real schedule has arrived does nothing.
+  - The automatic "save the schedule when none exists" is removed; a manager adds or uploads the schedule instead.
+  - The local demo mode (no database) still uses the sample list.
+- Tests: the test databases now start with a schedule put in by the test itself.
+
+## Fix: the app suddenly going white and reloading (Nov 20, 12:25)
+
+- **Cause.** Streamlit keeps the app's frame only while every run of the server script draws it. If a run fails
+  before or while drawing it, Streamlit shows an error box in its place (hidden on this page, so the screen turns
+  white). The next good run draws a new frame, which is a full reload, and the page then showed its older kept copy
+  until live data arrived. Three things could make a run fail:
+  - **Values that are not valid JSON.** A date object or a "not a number" in a stored document could not be handed
+    to the frame, so drawing it failed.
+  - **The sidebar or the storage status check.** If either raised an error, the run stopped before reaching the frame.
+  - **Any other error while drawing.**
+- **Fix** (`streamlit_app.py` only):
+  - Every answer handed to the frame is checked and, if needed, cleaned into valid JSON first (`json_safe`). Valid
+    answers pass through untouched.
+  - If drawing the frame still fails, it is drawn again at once with a plain answer, so the frame is never replaced.
+    The page then simply asks again.
+  - The sidebar and the storage status check can no longer stop the run before the frame is drawn.
+- Restarts of the app by Streamlit Cloud (a push to GitHub, running out of memory) still reload every open page. The
+  open case comes back and typed entries are kept (Nov 18–19).
+- Test: `tests/test_frame.py` (new).
+
+## Nov 22: clean-up, realtime saving only, every Case History entry kept (with the IM•LOGIC bridge)
+Built on the version with the IM•LOGIC ⇄ PET message thread (`im_pet_bridge.py`, see `IM_LOGIC_BRIDGE.md`). Nothing was
+removed from what users can do.
+* **Saving is realtime only.** Case entries already save as you type (bundled every 0.25 s). The last change waiting in that
+  bundle used to be lost if the page was closed, reloaded or put in the background within 0.25 s; it is now sent at once
+  (`flushSaves()` on page hide / close). The draft kept on page close is now really sent too (it waited for the same bundle).
+* **Every Case History entry is kept.** A field's history line is written when you leave the field. If the page was closed or
+  reloaded while still typing, the value was saved but its history line was not; the field is now finished first, so the
+  line is written. IM•LOGIC messages that arrived while PET was closed (up to 7 days back) now also go into the case
+  history, with the message's own time and id, so every screen writes the same single entry (it used to take only messages
+  from the last 10 minutes).
+* **IM•LOGIC thread glitches fixed.** A sent reply or a new IM•LOGIC message did not show while the cursor was in the case
+  (the redraw waits until typing stops, and the reply box is in the case). The thread now updates in place, without redrawing
+  the case. An unsent reply is kept like other unfinished entries (also after a reload). On the server, the message checks
+  use database indexes (they stay quick as the thread grows) and fail fast while MongoDB is unreachable, so they can never
+  hold up the page.
+* **Removed (outdated):** the 34 calls to the old general-action loggers that no longer recorded anything (`glog`, `aglog`);
+  the reader for the old text copy of the data (replaced by IndexedDB on Nov 19), whose leftover is now cleared from the
+  browser storage to free space.
+* Tests: `tests/live_bridge_pet_side.js` (PET's side of the IM•LOGIC thread, the other app simulated through the shared test
+  file), new checks in `tests/feature_checks.js`, `tests/shim_boot_cache.js` now uses an IndexedDB stand-in.

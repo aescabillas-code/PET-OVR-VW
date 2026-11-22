@@ -137,6 +137,36 @@ def read_template(name: Any) -> Dict[str, Any]:
         return {"missing": True}
 
 
+def json_safe(o: Any) -> Any:
+    """Nov 20: the answer handed to the app's frame must be valid JSON. A value that is not (a date object or "not a
+    number" in a stored document) made Streamlit fail while drawing the frame: the frame disappeared (white screen) and
+    came back reloaded, showing an older copy. Valid answers pass through untouched; others are cleaned."""
+    try:
+        json.dumps(o, allow_nan=False, separators=(",", ":"))
+        return o
+    except (TypeError, ValueError, OverflowError):
+        return _json_clean(o)
+
+
+def _json_clean(o: Any) -> Any:
+    import math
+    if o is None or isinstance(o, (str, bool, int)):
+        return o
+    if isinstance(o, float):
+        return o if math.isfinite(o) else None
+    if isinstance(o, dict):
+        return {str(k): _json_clean(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple, set)):
+        return [_json_clean(v) for v in o]
+    ts = getattr(o, "timestamp", None)
+    if callable(ts):
+        try:
+            return int(ts() * 1000)
+        except Exception:  # noqa: BLE001
+            pass
+    return str(o)
+
+
 def now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -686,9 +716,35 @@ def _body(data: Any) -> Dict[str, Any]:
     return out
 
 
+def _bridge_db(store: Any) -> Any:   # IM•LOGIC bridge: the thread lives in PET's own database
+    fake = os.environ.get("BRIDGE_FAKE_FILE")   # tests only: a file shared with an IM•LOGIC test server
+    if fake:
+        import im_pet_bridge
+        return im_pet_bridge.FakeDB(fake)
+    db = getattr(store, "db", None)
+    if db is not None and not getattr(store, "_bridge_idx", False):
+        store._bridge_idx = True   # once per server: the message checks every few seconds stay quick as the thread grows
+        try:
+            for coll, keys in (("bridge_msgs", ("ts", "pet")), ("bridge_links", ("ts",))):
+                for k in keys:
+                    db[coll].create_index(k)
+        except Exception:  # noqa: BLE001
+            store._bridge_idx = False
+    return db
+
+
 def execute(store: MemStore, op: str, a: Dict[str, Any]) -> Any:
     """Run one request from the browser. Same semantics as the original REST API."""
     a = a or {}
+    if isinstance(op, str) and op.startswith("bridge_"):   # IM•LOGIC bridge (pet_bridge/apply_to_pet.py)
+        import im_pet_bridge
+        try:
+            run = getattr(store, "_run", None)   # MongoDB: same quick failure while it is unreachable (the page never stalls)
+            if callable(run) and not os.environ.get("BRIDGE_FAKE_FILE"):
+                return run(lambda: im_pet_bridge.execute(_bridge_db(store), op, a, "PET"))
+            return im_pet_bridge.execute(_bridge_db(store), op, a, "PET")
+        except im_pet_bridge.BridgeError as ex:
+            raise ApiError(ex.code, str(ex))
     if op == "versions":
         return store.versions()
     if op == "get":
@@ -960,23 +1016,16 @@ def main() -> None:
         return store, Bridge(store), err
 
     store, bridge, store_err = boot()
-    live_problem = store.problem() if hasattr(store, "problem") else None
+    try:
+        live_problem = store.problem() if hasattr(store, "problem") else None
+    except Exception:  # noqa: BLE001
+        live_problem = None
 
-    with st.sidebar:
-        st.subheader("Storage")
-        (st.success if store.kind == "mongodb" and not live_problem else st.error)(store.describe())
-        if live_problem:
-            st.info(live_problem)
-        if store_err:
-            st.warning(store_err)
-            if st.button("Retry connection"):
-                boot.clear()
-                st.rerun()
-        if st.button("Show document counts"):        # not on every run: each count is a database round trip
-            try:
-                st.caption(f"Documents: {store.counts()}")
-            except Exception as ex:  # noqa: BLE001
-                st.caption(f"Could not count: {ex.__class__.__name__}")
+    try:
+        _sidebar(st, store, live_problem, store_err, boot)
+    except Exception as ex:  # noqa: BLE001  the sidebar must never stop the run before the app's frame is drawn
+        if "Rerun" in ex.__class__.__name__ or ex.__class__.__name__ == "StopException":
+            raise
 
     # Steady page (Nov 17): Streamlit keeps the app's frame only while it stays at the same place on the page. A message that
     # appears above it (an error, a spinner) moves it, and Streamlit then rebuilds the frame: a white screen and anything
@@ -995,6 +1044,24 @@ def main() -> None:
         frag(lambda: _bridge_run(st, component, bridge))()
     else:
         _bridge_run(st, component, bridge)
+
+
+def _sidebar(st, store, live_problem, store_err, boot) -> None:
+    with st.sidebar:
+        st.subheader("Storage")
+        (st.success if store.kind == "mongodb" and not live_problem else st.error)(store.describe())
+        if live_problem:
+            st.info(live_problem)
+        if store_err:
+            st.warning(store_err)
+            if st.button("Retry connection"):
+                boot.clear()
+                st.rerun()
+        if st.button("Show document counts"):        # not on every run: each count is a database round trip
+            try:
+                st.caption(f"Documents: {store.counts()}")
+            except Exception as ex:  # noqa: BLE001
+                st.caption(f"Could not count: {ex.__class__.__name__}")
 
 
 def _bridge_run(st, component, bridge: "Bridge", in_fragment: bool = True) -> None:
@@ -1018,7 +1085,14 @@ def _bridge_run(st, component, bridge: "Bridge", in_fragment: bool = True) -> No
     except Exception as ex:  # noqa: BLE001
         reply = {"now": now_ms(), "ok": False, "err": f"{ex.__class__.__name__}", "store": getattr(bridge.store, "kind", "?"),
                  "vers": None, "down": True, "synced": prev is not None, "res": {}}
-    value = component(reply=reply, key="pet_station", default=None)
+    try:
+        value = component(reply=json_safe(reply), key="pet_station", default=None)
+    except Exception as ex:  # noqa: BLE001  never let the frame be replaced by an error box (white screen + reload)
+        if "Rerun" in ex.__class__.__name__ or ex.__class__.__name__ == "StopException":
+            raise
+        reply = {"now": now_ms(), "ok": True, "store": getattr(bridge.store, "kind", "?"), "vers": None, "down": False,
+                 "synced": prev is not None, "res": {}}
+        value = component(reply=reply, key="pet_station", default=None)
     try:
         prev, rerun = absorb(bridge, prev, value, reply)
     except Exception:  # noqa: BLE001
