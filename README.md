@@ -1120,3 +1120,23 @@ removed from what users can do.
   browser storage to free space.
 * Tests: `tests/live_bridge_pet_side.js` (PET's side of the IM•LOGIC thread, the other app simulated through the shared test
   file), new checks in `tests/feature_checks.js`, `tests/shim_boot_cache.js` now uses an IndexedDB stand-in.
+
+## Attendance: 24-hour log-in times; late lowers attendance (Nov 23)
+* The **Logged in** time in the attendance list (Reports) and its Excel sheet is now in the 24-hour format of the schedule
+  (e.g. shift `09:00-18:00`, logged in `09:07`), so a late log-in is easy to see. When the log-in was on another day than
+  the shift (early for a night shift), the date is shown before the time.
+* **A late log-in now lowers attendance.** A late shift counts only for the part of it the agent was logged in for:
+  credit = 1 − minutes late ÷ shift minutes (e.g. 54 min late on a 9-hour shift = 90% for that day). On time (within the
+  5-minute grace) = 100%, absent = 0%. The attendance % in the report, the totals row, the scorecard and the Excel export all
+  use this. The counts (present / late / absent) are unchanged.
+* (Nov 23, 14:30) A **LATE** tag now shows beside a late log-in time in the attendance list (e.g. `09:07 LATE`), and in
+  the Excel sheet's "Logged in" column.
+
+## Report builder: running SLA time, last / next action, next action due time (Nov 23)
+New columns you can add in **Reports → Report builder** (they also go into the Excel export and saved templates):
+* **Running SLA Time (from MW start)**: time since the *current* maintenance window started (the latest updated window, if it
+  was changed), up to now, as hours:minutes (e.g. `27:05`). It stops at the closing time once the case is closed
+  (`26:05 (stopped at closing)`). `Not started` while the window is still ahead; empty when no window is set.
+* **Last Action**: the checklist task acknowledged last, with when and by whom.
+* **Next Action**: the checklist task with the reminder currently set (the earliest one not yet acknowledged); empty once closed.
+* **Next Action Due Time**: that task's reminder time.
