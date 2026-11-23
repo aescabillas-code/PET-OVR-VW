@@ -1614,6 +1614,24 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('no log-in until EOS: the day is marked Absent automatically', A.run("attAutoAbsent(pers('At Cy'),dkey(wall(Date.now())))") === true);
     const at = J(A.run("JSON.stringify(['At Amy','At Ben','At Cy'].map(n=>{const a=attOf(n,fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now());return{n,sch:a.sch,pres:a.pres,late:a.late,abs:a.abs}}))"));
     check('attendance is matched with the schedule: present / late / absent', at[0].pres === 1 && at[0].late === 1 && at[1].pres === 1 && at[1].late === 0 && at[2].abs === 1, JSON.stringify(at));
+    // Nov 23: late lowers attendance; log-in times in 24-hour format
+    const lr = J(A.run("JSON.stringify((()=>{const a=attOf('At Amy',fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now()),b=attOf('At Ben',fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now());return{a:attPct(a),cr:a.cr,b:attPct(b),x:a.list[0]}})())"));
+    check('a late log-in lowers attendance (only the part of the shift logged in counts); on time stays 100%', lr.a < 100 && lr.a > 0 && lr.cr < 1 && lr.b === 100 && lr.x.cr === lr.cr, JSON.stringify(lr));
+    // Nov 23: report builder: running SLA from the current MW start, last / next action from the checklist
+    const rb = J(A.run(`JSON.stringify((()=>{const n=Date.now(),c={id:'rbx',items:[{text:'Call store',rem:{at:n-7e6,done:{at:n-6e6,by:'Ana',text:'ok'}}},{text:'Confirm CE',rem:{at:n-3e6,done:{at:n-2e6,by:'Ben',text:'ok'}}},{text:'Check part',rem:{at:n+36e5}},{text:'Other',done:true}],mw:{s:n-(27*60+5)*6e4-1000,e:n+36e5},mwUp:[]};
+      const later={...c,mw:{s:n+6e5}},closed={...c,closed:true,closedAt:n-60*6e4};
+      return{run:RF('slaRun').g(c),ns:RF('slaRun').g(later),cl:RF('slaRun').g(closed),none:RF('slaRun').g({items:[]}),last:RF('lastAct').g(c),next:RF('nextAct').g(c),nextCl:RF('nextAct').g(closed),due:RF('nextDue').g(c),dueX:xdt(n+36e5),dueCl:RF('nextDue').g(closed),
+        upd:RF('slaRun').g({...c,mwUp:[{s:n-30*6e4}]})}})())`));
+    check('running SLA time counts from the current maintenance window start (hours:minutes)', rb.run === '27:05' && rb.ns === 'Not started' && rb.none === '' && rb.upd === '0:30', JSON.stringify(rb));
+    check('... and stops at the closing time once the case is closed', rb.cl === '26:05 (stopped at closing)', rb.cl);
+    check('last action = the task acknowledged last', rb.last.startsWith('Confirm CE (acknowledged ') && rb.last.endsWith(' by Ben)'), rb.last);
+    check('next action = the task with the reminder set now (none once closed)', rb.next === 'Check part' && rb.nextCl === '', rb.next);
+    check('next action due time = that reminder time', rb.due === rb.dueX && !!rb.due && rb.dueCl === '', JSON.stringify(rb));
+    check('the four columns can be added in the report builder', ['slaRun','lastAct','nextAct','nextDue'].every(k=>A.run(`!!RF('${k}')`)));
+    check('54 min late on a 9-hour shift counts 90%', A.run('attCr(54,540)') === 0.9 && A.run('attCr(600,540)') === 0 && A.run('attCr(0,540)') === 1);
+    check('log-in times are shown in 24-hour format like the schedule', /^\d{2}:\d{2}$/.test(A.run("attTime(fromLI(ymd(wall(Date.now()))+'T21:07'),ymd(wall(Date.now())))")) && A.run("attTime(fromLI(ymd(wall(Date.now()))+'T21:07'),ymd(wall(Date.now())))") === '21:07' && A.run("attTime(0)") === '—');
+    check('the attendance list and its Excel sheet use the 24-hour time', htmlSrc.includes("${td(attTime(x.in,x.k)+(x.st==='Late'?") && htmlSrc.includes("x.in?attTime(x.in,x.k)+(x.st==='Late'?' LATE':''):''"));
+    check('a LATE tag is shown beside a late log-in time (list and Excel)', htmlSrc.includes('font-bold text-amber-700\\">LATE</span>') || htmlSrc.includes('font-bold text-amber-700">LATE</span>'));
     A.run("ATT_SINCE=Date.now()-2*864e5");
     const gm = J(A.run("JSON.stringify(['At Amy','At Cy'].map(n=>{const a=attOf(n,fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now());return{sch:a.sch,pres:a.pres,abs:a.abs}}))"));
     check('the month attendance was set up in counts every scheduled shift as present (100%) except Absent on the schedule', gm[0].pres === 1 && gm[1].pres === 1 && gm[1].abs === 0 && attTxtCheck(), JSON.stringify(gm));
