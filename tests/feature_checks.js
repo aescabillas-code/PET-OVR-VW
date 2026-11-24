@@ -52,7 +52,44 @@ function client(me) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 let FAILS = 0;
-const check = (name, ok, extra) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : '  ' + (extra || ''))); if (!ok) FAILS++; };
+// Nov 24: the old hand-over split and agent-to-agent balancing were replaced by the hand-over queue (5 per available agent every
+// hour). Their checks are kept here by name and reported as RETIRED; the queue has its own checks (search 'Hand-over queue').
+const RETIRED = new Set([
+"if nobody is on shift yet the cases wait for the first agent to start",
+"a manual hand-over is shared evenly between the agents on shift, never to someone off shift",
+"a manual hand-over to an agent who has not started yet stays put",
+"manual hand-overs are marked so they are never taken back",
+"the second click hands all open cases to the agent on shift",
+"a new agent in mid-shift is given cases until the workload is even",
+"the newest untouched cases moved first (BL-5 down to BL-2)",
+"balanced cases are marked so they are never balanced again",
+"no alarm or acknowledge window for a balanced case",
+"every hand-over case of the busy agents was worked on, yet the signed-in agent is filled up evenly",
+"her 6 new cases are on top of the hand-over share (not counted, not moved)",
+"hand-over is not limited by who held the case before",
+"nobody available at EOS: the cases stay with the leaving agent",
+"sign-in balancing fills the new agent up evenly (4/4/4 hand-over cases)",
+"cases that were hers before go back to her first",
+"once available with no hand-over since sign-in, she gets an equal share from the agents who have cases (4/4/4)",
+"it happens once per sign-in (no balancing every time)",
+"an agent below the round limit is filled up evenly even after one hand-over (4/4/4)",
+"an agent tagged as coordinator also gets hand-over cases after signing in (4/4/4)",
+"100 cases ÷ 4 available agents = 25 each",
+"new cases are on top, not part of the share",
+"the case history has a plain hand-over line (no math)",
+"one more available agent: 100 ÷ 5 = 20 each (she gets 5 from each)",
+"her new cases stayed with Amy (5 new + 20 hand-over)",
+"a late agent gets the share of the open hand-over cases: 80 ÷ 6 = 13 (a giver with none open is skipped)",
+"the next check (30 s later) gives her the share once cases can move",
+"when an agent's shift starts she gets her share at once, without her own browser open (30 ÷ 4 = 7)",
+"the agent ending in 3 hours gives first (down to the share), then the busiest",
+"new cases still stay with the agent who received them",
+"the move is logged as a plain line in Case History",
+"back from Unavailable: balanced again straight away",
+"signing in on shift counts as becoming available too",
+"a late end-of-shift hand-over says when the shift ended and that nobody was available then"
+]);
+const check = (name, ok, extra) => { if (RETIRED.has(name)) { console.log('RETIRED ' + name); return; } console.log((ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : '  ' + (extra || ''))); if (!ok) FAILS++; };
 const J = s => JSON.parse(s);
 let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
 
@@ -831,9 +868,9 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('a manual transfer does not pop up a new-case assignment either', A.run("getCase('XF-9').owner") === 'Karen Sabile' && A.run("LOCAL_NOTICES.filter(n=>n.owner==='Karen Sabile').length") === 0);
     A.run("ME={role:'agent',name:'Haina Azuela'};applyMe()");
     A.run('render()');
-    check('nothing left to hand over: the offer disappears', String(A.els['eos-xfer'].innerHTML) === '');
+    check('nothing left to hand over: the offer disappears', !String(A.els['eos-xfer'].innerHTML).includes('Hand over my'));
     A.run("ME={role:'agent',name:'Karen Sabile'};applyMe();CASES.push(mkCase('XF-7','Karen Sabile',{}));render()");
-    check('an agent far from EOS is not offered the hand-over', String(A.els['eos-xfer'].innerHTML) === '');
+    check('an agent far from EOS is not offered the hand-over', !String(A.els['eos-xfer'].innerHTML).includes('Hand over my'));
     // alerts shown or acknowledged are remembered on the device
     A.run("disAdd('men|zzz')");
     check('a dismissed alert is remembered', A.run("disHas('men|zzz')") === true && A.run("disHas('men|other')") === false);
@@ -1001,7 +1038,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run('xferAll();xferAll()');
     check('a hand-over by hand with nobody online keeps the cases with the owner, marked to go out', A.run("CASES.every(c=>c.owner==='Ending Eva'&&c.hop==='Ending Eva')") === true && A.run("loadOf('Off Otto')") === 0);
     A.run('eosCheck();eosCheck()');
-    check('they are not given to off-shift or near-EOS agents', A.run("CASES.every(c=>c.owner==='Ending Eva')") === true);
+    check('they are not given to off-shift or near-EOS agents (Nov 24: they wait in the hand-over queue)', A.run("CASES.every(c=>c.owner===HOQ)") === true);
     A.run('render()');
     st([ag('Ending Eva', -480, 40), ag('Off Otto', 200, 700), ag('Fresh Fay', -5, 500), ag('Fresh Finn', -5, 500)]);
     A.run('eosCheck()');
@@ -1610,6 +1647,14 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('Agent Status shows Absent', String(A.els['agent-list'].innerHTML).includes('>Absent</span>'));
     A.run("ME={role:'agent',name:'At Amy'};applyMe();recordAtt()");
     check('logging in records the time and removes Absent (late after the start)', A.run("isAbsentNow(pers('At Amy'),simNow())") === false && A.run("onlineAgents(simNow()).some(p=>p.name==='At Amy')") === true && A.run("ATT[attId('At Amy',dkey(wall(Date.now())))].late") >= 119);
+    // Nov 23 fix: the log-in is also recorded when the attendance list arrives after signing in, or when already signed in from before
+    A.run("window.__k=attId('At Amy',dkey(wall(Date.now())));delete ATT[__k];ATTPEND.clear();delete ATT_MINE[__k];GOT.att=0;ATT_FROM=Date.now()-100*6e4;ME={role:'agent',name:'At Amy'};applyMe();SAVED_PENDING=false;window.__r=recordAtt()");
+    check('signed in before the attendance list loaded: nothing recorded yet (still Absent)', A.run('__r') === false && A.run("isAbsentNow(pers('At Amy'),simNow())") === false && !A.run('ATT[__k]'));
+    A.run("GOT.att=1");
+    check('... still shown Absent until it is recorded', A.run("isAbsentNow(pers('At Amy'),simNow())") === true);
+    A.run("attKeep()");
+    check('... and recorded as soon as the list is there, with the time the agent signed in (not the time of the check)', A.run("Math.abs(ATT[__k].in-ATT_FROM)<1000") === true && A.run("ATT[__k].late") >= 19 && A.run("ATT[__k].late") <= 21 && A.run("isAbsentNow(pers('At Amy'),simNow())") === false, A.run("JSON.stringify(ATT[__k])"));
+    check('the check also runs every 20 s while signed in and when the attendance list changes', htmlSrc.includes('setInterval(attKeep,20000)') && htmlSrc.includes('ATT=m;attKeep();render()'));
     A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();attEosCheck()");
     check('no log-in until EOS: the day is marked Absent automatically', A.run("attAutoAbsent(pers('At Cy'),dkey(wall(Date.now())))") === true);
     const at = J(A.run("JSON.stringify(['At Amy','At Ben','At Cy'].map(n=>{const a=attOf(n,fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now());return{n,sch:a.sch,pres:a.pres,late:a.late,abs:a.abs}}))"));
@@ -1618,16 +1663,101 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     const lr = J(A.run("JSON.stringify((()=>{const a=attOf('At Amy',fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now()),b=attOf('At Ben',fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now());return{a:attPct(a),cr:a.cr,b:attPct(b),x:a.list[0]}})())"));
     check('a late log-in lowers attendance (only the part of the shift logged in counts); on time stays 100%', lr.a < 100 && lr.a > 0 && lr.cr < 1 && lr.b === 100 && lr.x.cr === lr.cr, JSON.stringify(lr));
     // Nov 23: report builder: running SLA from the current MW start, last / next action from the checklist
-    const rb = J(A.run(`JSON.stringify((()=>{const n=Date.now(),c={id:'rbx',items:[{text:'Call store',rem:{at:n-7e6,done:{at:n-6e6,by:'Ana',text:'ok'}}},{text:'Confirm CE',rem:{at:n-3e6,done:{at:n-2e6,by:'Ben',text:'ok'}}},{text:'Check part',rem:{at:n+36e5}},{text:'Other',done:true}],mw:{s:n-(27*60+5)*6e4-1000,e:n+36e5},mwUp:[]};
-      const later={...c,mw:{s:n+6e5}},closed={...c,closed:true,closedAt:n-60*6e4};
+    const rb = J(A.run(`JSON.stringify((()=>{const n=Date.now(),c={id:'rbx',items:[{text:'Call store',rem:{at:n-7e6,done:{at:n-6e6,by:'Ana',text:'ok'}}},{text:'Confirm CE',rem:{at:n-3e6,done:{at:n-2e6,by:'Ben',text:'ok'}}},{text:'Check part',rem:{at:n+36e5}},{text:'Other',done:true}],mw:{s:n+(2*1440+5*60+30)*6e4+30000,e:n+4*864e5},mwUp:[]};
+      const later={...c,mw:{s:n-(27*60+5)*6e4-30000}},closed={...c,closed:true,closedAt:n-60*6e4};
       return{run:RF('slaRun').g(c),ns:RF('slaRun').g(later),cl:RF('slaRun').g(closed),none:RF('slaRun').g({items:[]}),last:RF('lastAct').g(c),next:RF('nextAct').g(c),nextCl:RF('nextAct').g(closed),due:RF('nextDue').g(c),dueX:xdt(n+36e5),dueCl:RF('nextDue').g(closed),
-        upd:RF('slaRun').g({...c,mwUp:[{s:n-30*6e4}]})}})())`));
-    check('running SLA time counts from the current maintenance window start (hours:minutes)', rb.run === '27:05' && rb.ns === 'Not started' && rb.none === '' && rb.upd === '0:30', JSON.stringify(rb));
-    check('... and stops at the closing time once the case is closed', rb.cl === '26:05 (stopped at closing)', rb.cl);
-    check('last action = the task acknowledged last', rb.last.startsWith('Confirm CE (acknowledged ') && rb.last.endsWith(' by Ben)'), rb.last);
-    check('next action = the task with the reminder set now (none once closed)', rb.next === 'Check part' && rb.nextCl === '', rb.next);
-    check('next action due time = that reminder time', rb.due === rb.dueX && !!rb.due && rb.dueCl === '', JSON.stringify(rb));
+        upd:RF('slaRun').g({...c,mwUp:[{s:n+90*6e4+30000}]})}})())`));
+    check('SLA column = time left from the moment the report is extracted until the current maintenance window starts (days and hours:minutes)', rb.run === '2d 05:30 left' && rb.ns === 'Started 1d 03:05 ago' && rb.none === 'No maintenance window data' && rb.upd === '0d 01:30 left', JSON.stringify(rb));
+    check('... a closed case is counted at its closing time', rb.cl === '2d 06:30 left (at closing)', rb.cl);
+    // Nov 24: the hand-over batch is set in Settings; the Account Name column can show the actual account name
+    A.run("window.__hb=HO_BATCH;hoqSet(3)");
+    check('the number of cases per agent every hour can be changed in Settings (Shift Schedule)', A.run('HO_BATCH') === 3 && A.run("hoqSetHtml(false)").includes('value="3"') && A.run("setTabTo('shift');document.getElementById('set-body').innerHTML.includes('Cases given to each available agent every hour')") === true);
+    A.run("hoqSet(0);hoqSet(999)");
+    check('... only 1 to 50 is accepted', A.run('HO_BATCH') === 3);
+    A.run("HO_BATCH=__hb;clearTimeout(HOQ_T)");
+    {
+      const cells2 = {}; const mk2 = k => cells2[k] || (cells2[k] = {});
+      const xl0 = A.ctx.ExcelJS, sb0 = A.ctx.saveBlob;
+      A.ctx.ExcelJS = { Workbook: function () { this.addWorksheet = () => ({ getColumn: () => ({}), getCell: (r, c) => mk2(r + ':' + c), mergeCells() {}, getRow: r => ({ getCell: c => mk2(r + ':' + c), set height(v) {} }) }); this.xlsx = { writeBuffer: async () => new Uint8Array([1]) }; } };
+      A.ctx.saveBlob = () => {};
+      A.run("window.__rc=CASES.slice();window.__rf=[RPT.from,RPT.to,RPT.account,RPT.type,RPT.status];CASES.length=0;CASES.push(mkCase('AC-1','Haina Azuela',{account:'Acct P',recv:Date.now()-2000}),mkCase('AC-2','Haina Azuela',{account:'Acct Q',recv:Date.now()-1000}));CASES[0].store='1234';CASES[1].store='N/A';RPT.from=RPT.to=ymd(wall(Date.now()));RPT.account='all';RPT.type='all';RPT.status='all';window.__rn=window.__petRealNames;window.__petRealNames=async l=>({configured:true,map:{[acctNorm('Acct P')]:'Real P Inc',[acctNorm('Acct Q')]:'Real Q Inc'},missing:[]});RPT.cols=['account'];RPT.acctMode='store'");
+      await A.run("exportXlsx('custom')");
+      const st0 = [cells2['5:1'] && cells2['5:1'].value, cells2['6:1'] && cells2['6:1'].value];
+      A.run("RPT.acctMode='name'"); await A.run("exportXlsx('custom')");
+      const nm0 = [cells2['5:1'] && cells2['5:1'].value, cells2['6:1'] && cells2['6:1'].value];
+      check('report builder: Account Name column = store number (account name if the store is N/A) by default', st0[0] === '1234' && st0[1] === 'Acct Q', JSON.stringify(st0));
+      check('... or the actual account name when chosen', nm0[0] === 'Real P Inc' && nm0[1] === 'Real Q Inc', JSON.stringify(nm0));
+      A.run("RPT.view='builder';setTabTo('reports')");
+      check('... the choice is in the report builder and saved with a template', A.run("document.getElementById('set-body').innerHTML.includes('The actual account name')") === true && A.run("(()=>{const l=TPL.length;document.getElementById('tpl-name')?0:0;const t={id:'t1',name:'X',cols:['account'],heads:{},acctMode:'name'};TPL.push(t);RPT.acctMode='store';tplLoad('t1');const ok=RPT.acctMode==='name';TPL.splice(TPL.indexOf(t),1);return ok})()") === true);
+      A.run("['AC-1','AC-2'].forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)});CASES.length=0;__rc.forEach(c=>CASES.push(c));[RPT.from,RPT.to,RPT.account,RPT.type,RPT.status]=__rf;window.__petRealNames=__rn;RPT.cols=WEEKLY.slice();RPT.acctMode='store';RPT.view='weekly'");
+      A.ctx.ExcelJS = xl0; A.ctx.saveBlob = sb0;
+    }
+    // Nov 24: next action = the item added last to the checklist (any day), last action = the item added before it
+    const ra = J(A.run(`JSON.stringify((()=>{const n=Date.now(),D=864e5,c={id:'rby',items:[{text:'Call store',at:n-3*D,by:'Ana'},{text:'Confirm CE',at:n-2*D,by:'Ben',done:true,rem:{at:n-2*D,done:{at:n-2*D}}},{text:'Check part',at:n-D,by:'Cy',rem:{at:n+36e5}}]},
+      tpl={id:'rbz',items:[{text:'First'},{text:'Second'}]},one={id:'rb1',items:[{text:'Only',at:n}]},done={...c,items:c.items.slice(0,2)};
+      return{last:RF('lastAct').g(c),lastX:'Confirm CE (added '+xdt(n-2*D)+' by Ben)',next:RF('nextAct').g(c),nextCl:RF('nextAct').g({...c,closed:true}),due:RF('nextDue').g(c),dueX:xdt(n+36e5),dueCl:RF('nextDue').g({...c,closed:true}),
+        tl:RF('lastAct').g(tpl),tn:RF('nextAct').g(tpl),ol:RF('lastAct').g(one),on:RF('nextAct').g(one),dn:RF('nextAct').g(done),dd:RF('nextDue').g(done)}})())`));
+    check('next action = the item added last to the checklist (even added on another day); none once closed', ra.next === 'Check part' && ra.nextCl === '' && ra.tn === 'Second' && ra.on === 'Only' && ra.dn === 'Confirm CE', JSON.stringify(ra));
+    check('last action = the item added before it (with when and by whom it was added)', ra.last === ra.lastX && ra.tl === 'First' && ra.ol === '', JSON.stringify(ra));
+    check('next action due time = the reminder time of that last item (empty when it has none open)', ra.due === ra.dueX && ra.dueCl === '' && ra.dd === '', JSON.stringify(ra));
     check('the four columns can be added in the report builder', ['slaRun','lastAct','nextAct','nextDue'].every(k=>A.run(`!!RF('${k}')`)));
+  // ---------- Hand-over queue (Nov 24) ----------
+  {
+    const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const nowM = A.run('minOf(simNow())');
+    const ag = (name, a, b, st) => ({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: st || 'available' });
+    const st = l => A.run('STAFF=' + JSON.stringify(l) + ';ensureMgrs(STAFF);STAFFLOADED=true');
+    const L = n => A.run(`CASES.filter(c=>!c.closed&&c.owner===${JSON.stringify(n)}).length`);
+    const ago = (n, min) => A.run(`CASES.forEach(c=>{(c.ownh||[]).forEach((x,i,a)=>{if(i&&a[i-1].n===HOQ&&x.n===${JSON.stringify(n)})x.at-=${min}*6e4})})`);
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();window.__ao=ATT_OFF;ATT_OFF=true;window.__stf=STAFF;window.__cs=CASES.slice();window.__me=ME");   // log-ins are not part of these checks; the schedule and cases are put back after
+    st([ag('Hq Gail', -540, -5), ag('Hq Amy', -100, 300), ag('Hq Ben', -100, 300)]);
+    A.run("CASES.length=0;for(let i=0;i<12;i++)CASES.push(mkCase('HQ-'+String(i).padStart(2,'0'),'Hq Gail',{}))");
+    A.run('eosCheck()');
+    check('Hand-over queue: at EOS all open cases of the leaving agent go to the hand-over queue', L('Hq Gail') === 0);
+    check('... each available agent gets 5 at once (12 cases, 2 agents: 5 + 5, 2 wait in the queue)', L('Hq Amy') === 5 && L('Hq Ben') === 5 && L(A.run('HOQ')) === 2, [L('Hq Amy'), L('Hq Ben'), L('Hand-over Queue')].join());
+    check('... the case history shows the move to the queue and the assignment from it', A.run("CASES.filter(c=>c.owner==='Hq Amy').every(c=>c.log.some(l=>/moved to the hand-over queue/.test(l.details||''))&&c.log.some(l=>String(l.details||'').includes('Hand-over queue: case assigned to Hq Amy (from Hq Gail)')))") === true, A.run("JSON.stringify(CASES.find(c=>c.owner==='Hq Amy').log.map(l=>l.details))"));
+    A.run('eosCheck()');
+    check('... no second batch before the hour is up', L('Hq Amy') === 5 && L('Hq Ben') === 5 && L('Hand-over Queue') === 2);
+    ago('Hq Amy', 61); ago('Hq Ben', 61); A.run('eosCheck()');
+    check('... another batch an hour later (the 2 left go out)', L('Hand-over Queue') === 0 && L('Hq Amy') + L('Hq Ben') === 12 && Math.abs(L('Hq Amy') - L('Hq Ben')) <= 0, [L('Hq Amy'), L('Hq Ben')].join());
+    check('... the queue owner is never counted as a person (productivity, misses)', A.run("QN(HOQ)&&!credsOf(CASES[0]).some(x=>x.n===HOQ)") === true);
+    // priority: high priority, then past due (most overdue first), then nearest due, then the rest
+    st([ag('Hq Gail', -540, -5), ag('Hq Cy', -100, 300)]);
+    A.run(`CASES.length=0;(()=>{const n=Date.now(),mk=(id,o)=>{const c=mkCase(id,'Hq Gail',{});c.items.forEach(i=>i.rem=null);if(o.hp)c.hp=true;if(o.due!=null)c.items[0].rem={at:n+o.due*6e4};CASES.push(c)};
+      mk('P-none',{});mk('P-late',{due:300});mk('P-soon',{due:20});mk('P-od1',{due:-10});mk('P-od2',{due:-90});mk('P-hp',{hp:1});mk('P-hp2',{hp:1,due:600});mk('P-none2',{})})()`);
+    A.run('eosCheck()');
+    check('Hand-over queue: high priority first, then past due (most overdue first), then nearest due', A.run("CASES.filter(c=>c.owner==='Hq Cy').map(c=>c.id).sort().join()") === ['P-hp', 'P-hp2', 'P-od1', 'P-od2', 'P-soon'].sort().join() && A.run("hoqList().map(c=>c.id).join()") === 'P-late,P-none,P-none2', A.run("CASES.filter(c=>c.owner==='Hq Cy').map(c=>c.id).join()") + ' | ' + A.run("hoqList().map(c=>c.id).join()"));
+    check('... the order of the queue', A.run("(()=>{const l=CASES.slice().sort(hoqCmp(Date.now())).map(c=>c.id);return l.slice(0,5).join()})()") === 'P-hp2,P-hp,P-od2,P-od1,P-soon' || A.run("(()=>{const l=CASES.slice().sort(hoqCmp(Date.now())).map(c=>c.id);return l.slice(0,5).join()})()") === 'P-hp,P-hp2,P-od2,P-od1,P-soon', A.run("CASES.slice().sort(hoqCmp(Date.now())).map(c=>c.id).join()"));
+    // a newly available agent gets 5 at once; nobody online: the cases wait in the queue
+    st([ag('Hq Gail', -540, -5), ag('Hq Dee', -100, 300, 'unavailable')]);
+    A.run("CASES.length=0;for(let i=0;i<7;i++)CASES.push(mkCase('HW-'+i,'Hq Gail',{}))");
+    A.run('eosCheck()');
+    check('Hand-over queue: nobody available: the cases wait in the queue (not with the leaving agent)', L('Hand-over Queue') === 7 && L('Hq Gail') === 0);
+    A.run("STAFF.find(p=>p.name==='Hq Dee').status='available';eosCheck()");
+    check('... an agent who becomes available gets 5 straight away', L('Hq Dee') === 5 && L('Hand-over Queue') === 2);
+    // no agent-to-agent balancing any more
+    st([ag('Hq Dee', -100, 300), ag('Hq Eve', -100, 300)]);
+    check('... cases are no longer moved from one agent to another when someone becomes available', A.run("balanceOnSignIn('Hq Eve')") === 0 && L('Hq Dee') === 5);
+    A.run('eosCheck()');
+    check('... she gets her batch from the queue instead', L('Hq Eve') === 2 && L('Hand-over Queue') === 0);
+    // hand-over by hand goes to the queue too
+    st([ag('Hq Fay', -480, 30), ag('Hq Gus', -100, 300)]);
+    A.run("CASES.length=0;for(let i=0;i<3;i++)CASES.push(mkCase('HM-'+i,'Hq Fay',{}));ME={role:'agent',name:'Hq Fay'};applyMe();xferAll();xferAll()");
+    check('Hand-over queue: an agent handing over before EOS sends the cases to the queue', L('Hq Fay') === 0 && L('Hand-over Queue') === 3);
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();eosXferRender()");
+    check('... the queue is shown with how many cases are waiting', String(A.els['eos-xfer'] ? A.els['eos-xfer'].innerHTML : A.run("document.getElementById('eos-xfer').innerHTML")).includes('Hand-over queue: 3 cases waiting'));
+    A.run('eosCheck()');
+    check('... and they go out from the queue', L('Hq Gus') === 3);
+    check('new cases still go round robin to the agents online (unchanged)', A.run("coverFor(simNow(),null,undefined,true)") === 'Hq Gus');
+    // the sender is only skipped during the same shift: a case open for days that every agent already had still goes out
+    st([ag('Hq Fay', -100, 300)]);
+    A.run("CASES.length=0;(()=>{const c=mkCase('HB-1','Hq Fay',{});c.owner=HOQ;c.hoq={from:'Hq Fay',at:Date.now()-60000};c.ownh=['Hq Amy','Hq Ben','Hq Fay',HOQ].map((n,i)=>({n,at:Date.now()-(4-i)*864e5}));CASES.push(c)})();eosCheck()");
+    check('the agent who sent a case to the queue does not get it back in that same shift', L('Hand-over Queue') === 1 && A.run("hoqBlocked(getCase('HB-1'),pers('Hq Fay'))") === true);
+    A.run("getCase('HB-1').hoq.at=Date.now()-2*864e5;eosCheck()");
+    check('... but from their next shift on they can (a case open for days that every agent already had still goes out)', A.run("getCase('HB-1').owner") === 'Hq Fay', A.run("getCase('HB-1').owner"));
+    A.run("Object.keys(ST).filter(k=>/^(HQ|P|HW|HM|HB)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");   // these test cases are not saved
+    A.run('ATT_OFF=__ao;STAFF=__stf;CASES.length=0;__cs.forEach(c=>CASES.push(c));ME=__me;applyMe()');
+  }
     check('54 min late on a 9-hour shift counts 90%', A.run('attCr(54,540)') === 0.9 && A.run('attCr(600,540)') === 0 && A.run('attCr(0,540)') === 1);
     check('log-in times are shown in 24-hour format like the schedule', /^\d{2}:\d{2}$/.test(A.run("attTime(fromLI(ymd(wall(Date.now()))+'T21:07'),ymd(wall(Date.now())))")) && A.run("attTime(fromLI(ymd(wall(Date.now()))+'T21:07'),ymd(wall(Date.now())))") === '21:07' && A.run("attTime(0)") === '—');
     check('the attendance list and its Excel sheet use the 24-hour time', htmlSrc.includes("${td(attTime(x.in,x.k)+(x.st==='Late'?") && htmlSrc.includes("x.in?attTime(x.in,x.k)+(x.st==='Late'?' LATE':''):''"));
@@ -1663,7 +1793,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('case details: Store number beside Account name, marked required', /Account name<\/label>[\s\S]{0,400}Store number <span class="text-red-600">\*<\/span>/.test(cb) && cb.includes('id="cd-store-mode"') && cb.includes('>N/A</option>') && cb.includes('>Type store number</option>'));
     A.run("cdSet('FT-0','store','7788');getCase('FT-0').account='Account A';openId=null");
     check('the store number is saved and logged in Case History', A.run("getCase('FT-0').store") === '7788' && A.run("getCase('FT-0').log.some(l=>l.action==='Store number updated'&&l.details==='7788')") === true);
-    check('Weekly report: the Account Name column shows the store number', A.run("RF('account').g(getCase('FT-0'))") === '7788' && htmlSrc.includes("x.value=k==='account'?acctCol(cs):rv(rw,k);"));
+    check('Weekly report: the Account Name column shows the store number', A.run("RF('account').g(getCase('FT-0'))") === '7788' && htmlSrc.includes("x.value=k==='account'?(kind!=='weekly'&&RPT.acctMode==='name'?realOf(cs.account):acctCol(cs)):rv(rw,k);"));
     check('Weekly report: the Account Name column stays blank when there is no store number', A.run("RF('account').g(getCase('FT-1'))") === '');
     // Nov 18: Store number dropdown: N/A or Type store number
     A.run("window.__ft2=getCase('FT-0').store;openId='FT-0';RCID='';renderCase();storeModeSet('FT-0','na')");
@@ -1796,7 +1926,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('a status save waits for the server\'s copy (no older schedule written back)', A.run('__n') === 0);
     A.run("window.__petCacheOnly=false");
     await sleep(1400);
-    check('then it is saved', A.run('__n') === 1);
+    check('then it is saved', A.run('__n') === 1, A.run('__n'));
     A.run("wq=__w;DBON=__d;ATT_OFF=false");
     check('a case field is saved within 0.25 s of a change, also while typing continues (no waiting for a pause)', htmlSrc.includes("PEND.add(c.id);if(ST[c.id])return;const one=c;ST[c.id]=setTimeout(()=>saveNow(one.id,one),250)}") && htmlSrc.includes("{try{rtSave(t)}catch(x){}}"));
     // Nov 22: a change still waiting for its 0.25 s bundle is sent at once when the page is hidden / closed
@@ -1858,7 +1988,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('the maintenance window is optional when closing a Canceled case', !A.run("missingFields(getCase('CN-1'))").some(x => /Maintenance/.test(x)) && A.run("(()=>{const c=getCase('CN-1');c.cstatus='Resolved';const r=missingFields(c).includes('Maintenance Window');c.cstatus='Canceled';return r})()"));
     A.run("(()=>{const n=Date.now(),c=mkCase('TL-1','Xr Cy',{});c.ownh=[{n:'Xr Amy',at:n-5*36e5}];c.credit={n:'Xr Amy',at:n-5*36e5};c.log=[{ts:n-3*36e5,action:'Ownership transferred',by:'System',details:'Xr Amy reached end of shift (EOS): case handed over to Xr Ben. Xr Amy → Xr Ben.'},{ts:n-1*36e5,action:'Ownership transferred',by:'System',details:'Balanced. Xr Ben → Xr Cy.'}];CASES.push(c)})()");
     check('who owned a case when: hand-overs in the case history are included even if the saved ownership list missed them', A.run("(()=>{const tl=ownTimeline(getCase('TL-1')),n=Date.now();return [ownerAt(tl,n-4*36e5),ownerAt(tl,n-2*36e5),ownerAt(tl,n-1000)].join()})()") === 'Xr Amy,Xr Ben,Xr Cy');
-    check('attendance keeps the first log-in of the day: it waits for the attendance list and checks the saved record before writing', htmlSrc.includes("if(DBON&&!GOT.att)return false;") && htmlSrc.includes("if(x&&x.in&&+x.in<=now){ATT[id]=x;return}"));
+    check('attendance keeps the first log-in of the day: it waits for the attendance list and checks the saved record before writing', htmlSrc.includes("if(DBON&&!GOT.att)return false;") && htmlSrc.includes("if(x&&x.in&&+x.in<=tin){ATT[id]=x;return}"));
     A.run("CASES=CASES.filter(c=>!['CN-1','TL-1'].includes(c.id))");
     // Nov 20: the built-in sample schedule (e.g. Lucille Layug) is never shown or saved when the database is on
     A.run("window.__w9=wq;window.__n9=0;wq=(k,fn)=>{if(k==='staff')__n9++;else return __w9(k,fn)};window.__S9=STAFF;window.__D9=STAFF_DOC;window.__L9=STAFFLOADED;window.__db9=DBON;DBON=true;SIMON=false;STAFF=DEMO_STAFF;STAFF_DOC=null;STAFFLOADED=false;ME={role:'manager',name:'Jeff Bote'};saveStatus('Lucille Layug');saveStaff(true,true)");

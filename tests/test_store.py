@@ -86,7 +86,10 @@ class BootTests(unittest.TestCase):
     def test_first_reply_carries_all_saved_data(self):
         s = app.MemStore(); b = app.Bridge(s)
         app.execute(s, "put", {"c": "cases", "id": "A1", "data": {"ts": 1}})
-        boot = b.reply(None)["boot"]
+        r = b.reply(None)
+        self.assertIsNone(r["boot"]); self.assertIn("bootz", r)   # Nov 24: sent compressed
+        import gzip, base64, json
+        boot = json.loads(gzip.decompress(base64.b64decode(r["bootz"])))
         self.assertEqual(boot["cases"]["docs"], {"A1": {"ts": 1}}); self.assertEqual(boot["cases"]["version"], 1)
         self.assertNotIn("boot", b.reply({"cid": "c1"}))
 
