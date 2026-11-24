@@ -170,9 +170,28 @@
   function wake() { if (!SYNC) return; AWAIT = 0; flush(); }
   try { document.addEventListener('visibilitychange', function () { if (!document.hidden) wake(); }); window.addEventListener('focus', wake); window.addEventListener('online', wake); } catch (e) {}   // idle heartbeat: one quiet rerun every few seconds; saves go out immediately (kick)
 
+  /* Faster opening (Nov 24): the data sent with the first answer comes compressed (about 8 times smaller, so it arrives much
+     sooner). It is unpacked here before the answer is used; answers are always used in the order they came. A browser that
+     cannot unpack it simply reads the data from the server the normal way. */
+  var RQ = Promise.resolve();
+  function unz(b64) {
+    var bin = atob(b64), u = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    var st = new Blob([u]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Response(st).text().then(function (t) { return JSON.parse(t); });
+  }
   window.addEventListener('message', function (ev) {
     var d = ev.data;
     if (!d || d.type !== 'streamlit:render') return;
+    var r0 = (d.args || {}).reply || {};
+    RQ = RQ.then(function () {
+      if (!r0.bootz) return;
+      var z = r0.bootz; delete r0.bootz;
+      if (r0.boot || typeof DecompressionStream === 'undefined') return;
+      return unz(z).then(function (b) { r0.boot = b; }, function () {});
+    }).then(function () { onRender(d); }, function () { onRender(d); });
+  });
+  function onRender(d) {
     var r = (d.args || {}).reply || {};
     var first = !SYNC;
     if (typeof r.now === 'number') { var sk = r.now - Date.now(); SKEW = SKEW == null ? sk : SKEW * 0.8 + sk * 0.2; }   // the server's clock (Nov 17)
@@ -202,7 +221,7 @@
     });
     if (r.vers) { VERS = r.vers; onVers(); cacheSoon(); }
     if (Object.keys(PEND).some(function (k) { return !PEND[k].sent; })) kick();
-  });
+  }
 
   var SEG = /^[A-Za-z0-9_\-]+$/, DOCID = /^[A-Za-z0-9_.\-~:@+]{1,200}$/;
   function parts(p) { return String(p).split('/').filter(Boolean); }
