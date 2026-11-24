@@ -19,6 +19,7 @@ Only a configuration problem (wrong password, bad URI) falls back to memory only
 import base64
 import collections
 import copy
+import gzip
 import hmac
 import json
 import os
@@ -815,6 +816,7 @@ class Bridge:
         self.err: Optional[str] = None
         self.lock = threading.Lock()
         self._sizes: Dict[Tuple[str, int], int] = {}     # (collection, version) -> JSON size of the whole collection
+        self._bootz: Optional[Tuple[Any, str]] = None    # (snapshot, its compressed text): packed once per snapshot
 
     def _size(self, c: str, one: Dict[str, Any]) -> int:
         key = (c, int(one.get("version") or 0))
@@ -861,6 +863,22 @@ class Bridge:
                     retry = isinstance(ex, DbDown) or is_transient(ex)
                     bucket[rid] = {"err": {"code": "unavailable", "message": "Database unavailable", "retry": retry}}
 
+    def pack_boot(self, boot: Any) -> Optional[str]:
+        """The data sent with a page's first answer, as gzip + base64 text. The same snapshot is packed only once."""
+        if not boot:
+            return None
+        with self.lock:
+            if self._bootz is not None and self._bootz[0] is boot:
+                return self._bootz[1]
+        try:
+            raw = json.dumps(json_safe(boot), allow_nan=False, separators=(",", ":")).encode("utf-8")
+            bz = base64.b64encode(gzip.compress(raw, 5)).decode("ascii")
+        except Exception:  # noqa: BLE001  the uncompressed copy is sent instead
+            return None
+        with self.lock:
+            self._bootz = (boot, bz)
+        return bz
+
     def reply(self, msg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         vers: Optional[Dict[str, int]]
         try:
@@ -880,6 +898,9 @@ class Bridge:
                 boot = self.store.snapshot()
             except Exception as ex:  # noqa: BLE001  the browser then simply asks for data the normal way
                 self.err = f"{ex.__class__.__name__}: {str(ex)[:200]}"
+            bz = self.pack_boot(boot)
+            if bz:   # Faster opening (Nov 24): sent compressed (about 8x smaller); the browser unpacks it (web/shim.js)
+                return {**base, "synced": False, "res": {}, "boot": None, "bootz": bz}
             return {**base, "synced": False, "res": {}, "boot": boot}
         cid = str(msg.get("cid") or "?")
         with self.lock:

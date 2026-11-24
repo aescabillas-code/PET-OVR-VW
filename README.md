@@ -1140,3 +1140,49 @@ New columns you can add in **Reports → Report builder** (they also go into the
 * **Last Action**: the checklist task acknowledged last, with when and by whom.
 * **Next Action**: the checklist task with the reminder currently set (the earliest one not yet acknowledged); empty once closed.
 * **Next Action Due Time**: that task's reminder time.
+
+## Fix: agents logged in but shown Absent with no log-in time (Nov 23, 20:30)
+The log-in was recorded only at the moment of signing in. It was missed when the attendance list had not loaded yet at that
+moment (common right after opening the page), when the agent was already signed in from before (page reopened or reloaded
+with the saved sign-in, or signed in for the previous day), or when they signed in more than 2 hours before the shift.
+Now it is also checked when the attendance list arrives and every 20 s while an agent is signed in. The time recorded is
+when the agent was first signed in on the page for that shift (not the time of the check), so lateness is right, and a write
+that did not get through is retried with that same time. The first log-in of the day is still never replaced by a later one.
+Days already shown Absent for agents who are signed in now get their log-in recorded as soon as they open PAT.
+
+## Hand-over queue, faster opening, last / next action from the checklist (Nov 24)
+**Hand-over queue (replaces the EOS split and agent-to-agent balancing)**
+* At EOS every open case of the leaving agent goes to the **Hand-over Queue** (shown as the owner, and as a yellow line
+  above the cases: how many are waiting, how many are high priority and past due). A hand-over requested by hand before
+  EOS ("Hand over my open cases") goes to the queue too.
+* Each available agent (on shift, Available, logged in, not within 30 min of their own EOS) gets **5 cases** from the
+  queue, and **another 5 every hour** after their last batch. An agent who becomes available gets their 5 straight away.
+* Order: **high priority** first, then cases whose reminder is **already past due** (most overdue first), then the
+  **nearest due**, then the rest (oldest first). One round's cases are dealt one by one to the agents with the fewest, so
+  urgent cases are spread out. The agent who sent a case to the queue does not get it back in that
+  same shift; from their next shift on they can receive it again (updated 11:40), so a case that stays open for days and
+  has been with every agent still always goes out.
+* Cases are no longer moved from one agent to another when someone becomes available (that balancing is switched off);
+  that agent gets their batch from the queue instead. **New cases (round robin) are unchanged.**
+* While a case waits in the queue, a due reminder is not counted as a miss for any agent. Case History shows the move to
+  the queue and the assignment from it. Productivity is unchanged (the agent who receives and updates it gets the credit).
+
+**Faster opening:** the data sent with the first answer when PAT opens is now compressed (about 8–10 times smaller,
+e.g. 1.4 MB → 145 KB for 900 cases), so it reaches the browser much sooner. The browser unpacks it; nothing else changes.
+
+**Report builder:** *Next Action* is now the item added **last** to the checklist (any day), *Last Action* the item added
+before it (with when and by whom it was added), and *Next Action Due Time* the reminder time of that last item.
+
+Tests: new "Hand-over queue" checks in `tests/feature_checks.js` (the old split/balancing checks are kept by name and reported
+as RETIRED), `tests/rules_conflict_check.js` checks the queue rules (at most 5 an hour, never held back while an agent can take
+a batch), `tests/test_store.py` reads the compressed first answer.
+
+## Settings: hand-over batch size; report builder: SLA time remaining, account name option (Nov 24, 12:15)
+* **Settings → Shift Schedule → Hand-over queue:** the number of cases each available agent gets from the queue every hour
+  (default 5, from 1 to 50). Managers and coordinators can change it; it saves as you type and applies on every screen.
+* **Report builder – SLA column** (now *SLA Time Remaining (until MW start)*, updated 12:35): the time left from the moment
+  the report is extracted until the current maintenance window **starts**, as days and hours:minutes (e.g. `2d 05:30 left`).
+  Once the start has passed: `Started 1d 03:05 ago`. A closed case is counted at its closing time (`… (at closing)`). No
+  maintenance window: `No maintenance window data`.
+* **Report builder – Account Name column shows:** choose *Store number (account name if the store is N/A)* (as before, the
+  default) or *The actual account name*. The choice is saved with report templates. The weekly report is unchanged.
