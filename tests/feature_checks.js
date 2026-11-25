@@ -1649,12 +1649,40 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('logging in records the time and removes Absent (late after the start)', A.run("isAbsentNow(pers('At Amy'),simNow())") === false && A.run("onlineAgents(simNow()).some(p=>p.name==='At Amy')") === true && A.run("ATT[attId('At Amy',dkey(wall(Date.now())))].late") >= 119);
     // Nov 23 fix: the log-in is also recorded when the attendance list arrives after signing in, or when already signed in from before
     A.run("window.__k=attId('At Amy',dkey(wall(Date.now())));delete ATT[__k];ATTPEND.clear();delete ATT_MINE[__k];GOT.att=0;ATT_FROM=Date.now()-100*6e4;ME={role:'agent',name:'At Amy'};applyMe();SAVED_PENDING=false;window.__r=recordAtt()");
-    check('signed in before the attendance list loaded: nothing recorded yet (still Absent)', A.run('__r') === false && A.run("isAbsentNow(pers('At Amy'),simNow())") === false && !A.run('ATT[__k]'));
+    // Nov 25: the agent's screen no longer waits for the attendance list (it checks the saved record of the shift itself)
+    check('signed in before the attendance list loaded: the log-in is recorded at once (no waiting for the list)', A.run('__r') === true && !!A.run('ATT[__k]&&ATT[__k].in'));
     A.run("GOT.att=1");
-    check('... still shown Absent until it is recorded', A.run("isAbsentNow(pers('At Amy'),simNow())") === true);
     A.run("attKeep()");
-    check('... and recorded as soon as the list is there, with the time the agent signed in (not the time of the check)', A.run("Math.abs(ATT[__k].in-ATT_FROM)<1000") === true && A.run("ATT[__k].late") >= 19 && A.run("ATT[__k].late") <= 21 && A.run("isAbsentNow(pers('At Amy'),simNow())") === false, A.run("JSON.stringify(ATT[__k])"));
-    check('the check also runs every 20 s while signed in and when the attendance list changes', htmlSrc.includes('setInterval(attKeep,20000)') && htmlSrc.includes('ATT=m;attKeep();render()'));
+    check('... with the time the agent signed in (not the time of the check)', A.run("Math.abs(ATT[__k].in-ATT_FROM)<1000") === true && A.run("ATT[__k].late") >= 19 && A.run("ATT[__k].late") <= 21 && A.run("isAbsentNow(pers('At Amy'),simNow())") === false, A.run("JSON.stringify(ATT[__k])"));
+    check('the check also runs every 20 s while signed in and when the attendance list changes', htmlSrc.includes('setInterval(attKeep,20000)') && htmlSrc.includes('ATT=attMerge(m);attKeep();render()'));
+    check('the live attendance copy holds only the last 3 days (small, quick on every screen); older days are read in the background', htmlSrc.includes("ATT_UNSUB=dbq.collection('att').where('ts','>=',ATT_LIVE_FROM).limit(5000).onSnapshot(") && !htmlSrc.includes("dbq.collection('att').where('ts','>=',Date.now()-100*864e5).limit(20000).onSnapshot(") && htmlSrc.includes("where('ts','<',to).limit(20000).get()"));
+    A.run("window.__ah=[ATT_HIST,GOT.atth,ATT_LIVE,ATT_LIVE_FROM];ATT_HIST={'zz_old':{n:'x',in:1}};ATT_LIVE={'zz_new':{n:'y',in:2}};window.__m=attMerge(ATT_LIVE)");
+    check('... both are combined (older days + live days)', A.run("!!(__m.zz_old&&__m.zz_new)") === true);
+    A.run("ATT_HIST=__ah[0];GOT.atth=__ah[1];ATT_LIVE=__ah[2];ATT_LIVE_FROM=__ah[3]");
+    const nh = J(A.run("JSON.stringify((()=>{const g=GOT.atth,lf=ATT_LIVE_FROM,db=DBON;GOT.atth=0;DBON=true;ATT_LIVE_FROM=Date.now();const k=attId('At Ben',dkey(new Date(wall(Date.now()).getTime()-5*864e5)));const sv=ATT[k];delete ATT[k];const a=attOf('At Ben',Date.now()-6*864e5,Date.now()-4*864e5);GOT.atth=1;const b=attOf('At Ben',Date.now()-6*864e5,Date.now()-4*864e5);GOT.atth=g;ATT_LIVE_FROM=lf;DBON=db;if(sv)ATT[k]=sv;return{a:a.abs,b:b.abs}})())"));
+    check('... an older day is never counted Absent just because the older days have not been read yet', nh.a === 0 && nh.b >= 1, JSON.stringify(nh));
+    // Nov 24 fix: a log-in whose save did not get through is tried again (it used to count as done until a reload)
+    A.run("window.__k2=attId('At Amy',dkey(wall(Date.now())));window.__amy=ATT[__k2];window.__amyM=ATT_MINE[__k2];delete ATT[__k2];ATTPEND.clear();delete ATT_MINE[__k2];ATT_OK.delete(__k2);window.__dq=dbq;window.__sets=0;window.__fail=true;window.__wait=[];dbq={doc:id=>({get:()=>Promise.resolve({exists:false}),set:d=>{__sets++;return __fail?Promise.reject(new Error('offline')):Promise.resolve()},onSnapshot(){}}),collection:()=>__dq.collection()};ME={role:'agent',name:'At Amy'};applyMe();SAVED_PENDING=false;GOT.att=1;window.__db0=DBON;DBON=true;recordAtt()");
+    await sleep(100);
+    check('a log-in whose save failed is not counted as saved', A.run('__sets') >= 1 && A.run('ATT_OK.has(__k2)') === false && !!A.run('ATT[__k2]&&ATT[__k2].in'));
+    const tin1 = A.run('ATT[__k2].in');
+    A.run("__fail=false;attKeep()"); await sleep(100);
+    check('... and is saved on the next check (every 20 s), with the same log-in time', A.run('ATT_OK.has(__k2)') === true && A.run('ATT[__k2].in') === tin1);
+    const s2 = A.run('__sets');
+    A.run('attKeep()'); await sleep(50);
+    check('... then not written again', A.run('__sets') === s2);
+    // Nov 24 (17:30): after a reload with the saved sign-in, the time the agent signed in is kept when the page was open until just now
+    const fr = J(A.run(`JSON.stringify((()=>{ME={role:'agent',name:'At Amy'};const n=Date.now(),sa=n-95*6e4;localStorage.setItem('pet_signed_in_at',String(sa));localStorage.setItem('pat_seen_'+seenK(),String(n-40000));const a=attFromRestore();localStorage.setItem('pat_seen_'+seenK(),String(n-30*6e4));const b=attFromRestore();return{a:a-sa,b:Math.abs(b-n)<5000}})())`));
+    check('after a reload / reopen with the saved sign-in, the log-in time is when the agent signed in (page open until just now)', fr.a === 0, JSON.stringify(fr));
+    check('... and now when the page had been closed for a while (they just came back)', fr.b === true, JSON.stringify(fr));
+    A.run("SEEN['Old Page']=undefined");
+    check('sign-in notes from a page on the older version (no "since") count from the first note of an unbroken run', htmlSrc.includes("since:+v.since||(o&&ts-o.ts<15*6e4?o.since:ts)"));
+    // second source: the sign-in notes, read on the hand-over screen
+    A.run("delete ATT[__k2];ATT_OK.delete(__k2);ME={role:'manager',name:'Jeff Bote'};applyMe();SEENSUB=true;GOT.seen=1;SEEN['At Amy']={ts:Date.now()-60000,since:Date.now()-30*6e4};window.__ao2=ATT_OFF;ATT_OFF=false;attSeenCheck()"); await sleep(100);
+    check('an agent on shift who is signed in (sign-in notes) but has no saved log-in gets it recorded from the notes', !!A.run('ATT[__k2]&&ATT[__k2].in') && A.run('ATT[__k2].src') === 'seen' && A.run('__sets') === s2 + 1 && A.run("isAbsentNow(pers('At Amy'),simNow())") === false);
+    A.run("delete ATT[__k2];SEEN['At Amy']={ts:Date.now()-40*6e4,since:Date.now()-50*6e4};attSeenCheck()");
+    check('... not when the notes stopped (signed out / page closed)', !A.run('ATT[__k2]'));
+    A.run("delete SEEN['At Amy'];dbq=__dq;DBON=__db0;ATT_OFF=__ao2;SEENSUB=false;ATT[__k2]=__amy;ATT_MINE[__k2]=__amyM;ATT_OK.add(__k2)");
     A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();attEosCheck()");
     check('no log-in until EOS: the day is marked Absent automatically', A.run("attAutoAbsent(pers('At Cy'),dkey(wall(Date.now())))") === true);
     const at = J(A.run("JSON.stringify(['At Amy','At Ben','At Cy'].map(n=>{const a=attOf(n,fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now());return{n,sch:a.sch,pres:a.pres,late:a.late,abs:a.abs}}))"));
@@ -1748,6 +1776,28 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('... the queue is shown with how many cases are waiting', String(A.els['eos-xfer'] ? A.els['eos-xfer'].innerHTML : A.run("document.getElementById('eos-xfer').innerHTML")).includes('Hand-over queue: 3 cases waiting'));
     A.run('eosCheck()');
     check('... and they go out from the queue', L('Hq Gus') === 3);
+    // Nov 24: Hand-over Queue in the transfer options
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();window.__na=needApproval;needApproval=()=>false;CASES.push(mkCase('HT-1','Hq Gus',{}));openId='HT-1';renderCase()");
+    check('Hand-over queue: it is in the transfer options of a case', String(A.els['case-body'].innerHTML).includes('<option value="Hand-over Queue"'));
+    A.run("doTransfer('HT-1',HOQ)");
+    check('... transferring a case there moves it to the queue (who sent it is kept, logged in Case History)', A.run("getCase('HT-1').owner") === 'Hand-over Queue' && A.run("getCase('HT-1').hoq.from") === 'Hq Gus' && A.run("getCase('HT-1').log.some(l=>/Moved to the hand-over queue by/.test(l.details||''))") === true);
+    A.run("openId=null;CASES.push(mkCase('HT-2','Hq Gus',{}));SELX={ids:new Set(['HT-2']),to:HOQ};bulkGo()");
+    check('... also when several ticked cases are transferred at once', A.run("getCase('HT-2').owner") === 'Hand-over Queue');
+    // Nov 24 (18:20): an agent on a day off never gets a case, also not by a manual transfer
+    A.run("(()=>{const o=J(STAFF.find(p=>p.name==='Hq Gus'));o.name='Hq Offday';o.msch={};o.msch[dkey(wall(Date.now()))]='OFF';o.msch[dkey(dayBefore(wall(Date.now())))]='OFF';STAFF.push(o);const q=J(o);q.name='Hq Ptoday';q.msch={};q.msch[dkey(wall(Date.now()))]='PTO';q.msch[dkey(dayBefore(wall(Date.now())))]='OFF';STAFF.push(q)})();CASES.push(mkCase('HO-1','Hq Gus',{}));CASES.push(mkCase('HO-2','Hq Gus',{}));doTransfer('HO-1','Hq Offday');doTransfer('HO-2','Hq Ptoday')");
+    check('a manual transfer to an agent whose day is OFF or PTO is refused (the case stays)', A.run("getCase('HO-1').owner") === 'Hq Gus' && A.run("getCase('HO-2').owner") === 'Hq Gus' && A.run("dayOff(pers('Hq Offday'))") === true);
+    A.run("SELX={ids:new Set(['HO-1']),to:'Hq Offday'};bulkGo()");
+    check('... also when several ticked cases are transferred', A.run("getCase('HO-1').owner") === 'Hq Gus');
+    A.run("reassign(getCase('HO-1'),'Hq Offday','test','System')");
+    check('... and never by any automatic move either', A.run("getCase('HO-1').owner") === 'Hq Gus');
+    A.run("getCase('HO-1').xreq={to:'Hq Offday',by:'Hq Gus',at:Date.now()};window.__sm=SIMON;SIMON=true;xreqApprove('HO-1');SIMON=__sm");
+    check('... an approved transfer request to that agent leaves the case where it is (logged)', A.run("getCase('HO-1').owner") === 'Hq Gus' && A.run("getCase('HO-1').log.some(l=>/is off today/.test((l.details||'')+(l.by||'')))") === true, A.run("JSON.stringify(getCase('HO-1').log.slice(0,3).map(l=>l.action+': '+l.details))"));
+    A.run("openId='HO-1';renderCase()");
+    check('... the agent shows as "(day off)" and cannot be picked in the transfer list', /<option value="Hq Offday"[^>]*disabled[^>]*>[^<]*\(day off\)/.test(String(A.els['case-body'].innerHTML)));
+    A.run("openId=null;doTransfer('HO-1','Hq Gus2')");
+    check('agents on shift can still receive manual transfers', A.run("(()=>{const o=J(pers('Hq Gus'));o.name='Hq Onshift';STAFF.push(o);doTransfer('HO-1','Hq Onshift');return getCase('HO-1').owner})()") === 'Hq Onshift');
+    A.run("STAFF=STAFF.filter(p=>!['Hq Offday','Hq Ptoday','Hq Onshift'].includes(p.name))");
+    A.run("needApproval=__na");
     check('new cases still go round robin to the agents online (unchanged)', A.run("coverFor(simNow(),null,undefined,true)") === 'Hq Gus');
     // the sender is only skipped during the same shift: a case open for days that every agent already had still goes out
     st([ag('Hq Fay', -100, 300)]);
@@ -1755,7 +1805,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('the agent who sent a case to the queue does not get it back in that same shift', L('Hand-over Queue') === 1 && A.run("hoqBlocked(getCase('HB-1'),pers('Hq Fay'))") === true);
     A.run("getCase('HB-1').hoq.at=Date.now()-2*864e5;eosCheck()");
     check('... but from their next shift on they can (a case open for days that every agent already had still goes out)', A.run("getCase('HB-1').owner") === 'Hq Fay', A.run("getCase('HB-1').owner"));
-    A.run("Object.keys(ST).filter(k=>/^(HQ|P|HW|HM|HB)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");   // these test cases are not saved
+    A.run("Object.keys(ST).filter(k=>/^(HQ|P|HW|HM|HB|HT|HO)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");   // these test cases are not saved
     A.run('ATT_OFF=__ao;STAFF=__stf;CASES.length=0;__cs.forEach(c=>CASES.push(c));ME=__me;applyMe()');
   }
     check('54 min late on a 9-hour shift counts 90%', A.run('attCr(54,540)') === 0.9 && A.run('attCr(600,540)') === 0 && A.run('attCr(0,540)') === 1);
@@ -1916,7 +1966,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('reports count an older case worked on in the period even if it is not among the 1,000 newest on screen', A.run("perfCases().some(c=>c.id==='OLD-9')") && A.run("caseIndex().items.some(it=>it.c.id==='OLD-9'&&it.wd.has('Cd Ben'))"));
     A.run("delete REPCASE['OLD-9'];PD_CACHE.clear();CIX=null");
     check('a second hand-over between the same two people on the same day gets its own history line', htmlSrc.includes("+'_'+(Array.isArray(c.ownh)?c.ownh.length:0)}:null"));
-    check('reports read the period day by day (no 20,000-entry cut-off) and the scorecard and Excel wait for it', htmlSrc.includes("for(let x=a0;x<=a1;x+=D)") && htmlSrc.includes("try{await Promise.race([loadRepAct(perfRange()[0]-21*864e5,perfRange()[1]),new Promise(r=>setTimeout(r,20000))])}catch(e){}"));
+    check('reports read the period day by day (no 20,000-entry cut-off) and the scorecard and Excel wait for it', htmlSrc.includes("for(let x=a0;x<=a1;x+=D)") && htmlSrc.includes("try{await Promise.race([Promise.all([loadRepAct(perfRange()[0]-21*864e5,perfRange()[1]),attHistLoad()]),new Promise(r=>setTimeout(r,20000))])}catch(e){}"));
     check('a "⇄ Transfer cases" button sits next to Add Case', htmlSrc.includes('onclick="bulkOpen()"'));
     // reload: the copy kept in the browser
     A.run("window.__petCacheOnly=true");
@@ -1988,7 +2038,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('the maintenance window is optional when closing a Canceled case', !A.run("missingFields(getCase('CN-1'))").some(x => /Maintenance/.test(x)) && A.run("(()=>{const c=getCase('CN-1');c.cstatus='Resolved';const r=missingFields(c).includes('Maintenance Window');c.cstatus='Canceled';return r})()"));
     A.run("(()=>{const n=Date.now(),c=mkCase('TL-1','Xr Cy',{});c.ownh=[{n:'Xr Amy',at:n-5*36e5}];c.credit={n:'Xr Amy',at:n-5*36e5};c.log=[{ts:n-3*36e5,action:'Ownership transferred',by:'System',details:'Xr Amy reached end of shift (EOS): case handed over to Xr Ben. Xr Amy → Xr Ben.'},{ts:n-1*36e5,action:'Ownership transferred',by:'System',details:'Balanced. Xr Ben → Xr Cy.'}];CASES.push(c)})()");
     check('who owned a case when: hand-overs in the case history are included even if the saved ownership list missed them', A.run("(()=>{const tl=ownTimeline(getCase('TL-1')),n=Date.now();return [ownerAt(tl,n-4*36e5),ownerAt(tl,n-2*36e5),ownerAt(tl,n-1000)].join()})()") === 'Xr Amy,Xr Ben,Xr Cy');
-    check('attendance keeps the first log-in of the day: it waits for the attendance list and checks the saved record before writing', htmlSrc.includes("if(DBON&&!GOT.att)return false;") && htmlSrc.includes("if(x&&x.in&&+x.in<=tin){ATT[id]=x;return}"));
+    check('attendance keeps the first log-in of the day: it checks the saved record of the shift before writing', !htmlSrc.includes("if(DBON&&!GOT.att)return false;") && htmlSrc.includes("if(x&&x.in&&+x.in<=tin){ATT[id]=x;ATT_OK.add(id);return}"));
     A.run("CASES=CASES.filter(c=>!['CN-1','TL-1'].includes(c.id))");
     // Nov 20: the built-in sample schedule (e.g. Lucille Layug) is never shown or saved when the database is on
     A.run("window.__w9=wq;window.__n9=0;wq=(k,fn)=>{if(k==='staff')__n9++;else return __w9(k,fn)};window.__S9=STAFF;window.__D9=STAFF_DOC;window.__L9=STAFFLOADED;window.__db9=DBON;DBON=true;SIMON=false;STAFF=DEMO_STAFF;STAFF_DOC=null;STAFFLOADED=false;ME={role:'manager',name:'Jeff Bote'};saveStatus('Lucille Layug');saveStaff(true,true)");
