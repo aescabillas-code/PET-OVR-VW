@@ -1186,3 +1186,52 @@ a batch), `tests/test_store.py` reads the compressed first answer.
   maintenance window: `No maintenance window data`.
 * **Report builder – Account Name column shows:** choose *Store number (account name if the store is N/A)* (as before, the
   default) or *The actual account name*. The choice is saved with report templates. The weekly report is unchanged.
+
+## Transfer to the hand-over queue; fix: agents signed in but still Absent (Nov 24, 16:45)
+* **Transfer options:** *Hand-over Queue* is now in the case's *Transfer ownership* list and in the list for ticked cases
+  ("Transfer to"). The case goes to the queue and out from it like the EOS cases (the agent who sent it does not get it back in
+  that same shift). Case History: "Moved to the hand-over queue by …". The coordinator-on-duty approval works as for any
+  manual transfer.
+* **Attendance fix:** a log-in shown on the agent's own screen was not always saved. When the save did not get through (slow or
+  lost connection) the screen still counted it as done and never tried again until a reload, so everyone else saw the agent
+  Absent with no log-in time. A log-in now counts as done only once the database has it, and is retried every 20 s with the same
+  first time. Second, independent source: every signed-in screen notes in the database every few minutes that it is signed in
+  and since when; the hand-over screen records the log-in from that note for an agent on shift who has none, and does not mark
+  someone Absent who was signed in during the shift.
+
+## Fix: attendance still not updating; open pages now pick up updates by themselves (Nov 24, 17:30)
+* **Why the fixes did not show:** a page left open keeps running the version it was opened with. Agents who keep PAT open
+  all day were still running the older code (with the attendance bug) after the update. Now every answer from the server
+  carries the version of the page it hands out; a page with an older version **reloads itself quietly** when it is safe:
+  in the background, or after 60 s without typing or clicking and with nothing being typed in. Unsaved changes are sent
+  first and the open case opens again. (Never more than twice per version: no reload loops.)
+* **Accurate log-in time after a reload:** when the page is reopened or reloaded with the saved sign-in, the log-in time is
+  the time the agent signed in, if the page was open until a few minutes before (signed in all along); otherwise (the
+  page had been closed) it is the time they came back.
+* The hand-over screen's backup (sign-in notes) also works for pages still on the older version: it counts from the
+  first note of an unbroken run of notes.
+* **After this update, every open PAT page must be refreshed once** (pages on the older version cannot reload themselves).
+  From then on, updates reach open pages automatically.
+* Tests: `tests/live_new_version.js` (quiet reload, never while typing), new checks in `tests/feature_checks.js` and
+  `tests/test_frame.py`.
+
+## Agents on a day off never get cases (Nov 24, 18:20)
+An agent whose day is **OFF or PTO** on the schedule is not given cases, also not by a manual transfer: the case's
+*Transfer ownership* list and the list for ticked cases show them as "(day off)" and they cannot be picked; a transfer (or an
+approved transfer request) to them leaves the case where it is, with a note; no automatic move gives them a case either.
+A night shift from the day before that is still running counts as on shift.
+
+## Fix: agents logged in but still Absent with a blank log-in (Nov 25)
+**Cause found:** every screen kept a live copy of **100 days** of attendance. Each log-in changed it, and every open screen then
+downloaded all 100 days again (hundreds of KB, growing every day). On slower connections that download did not finish, so screens
+kept showing an old copy (agents Absent, no log-in time), and an agent's own screen did not record the log-in at all until that
+download had arrived.
+* The live copy now holds only the **last 3 days** (small and quick on every screen). Older days are read once in the background
+  (15 s after opening, every 30 min, when Reports or the Shift Schedule is opened, and before the productivity Excel export) for
+  reports and the schedule. An older day is never counted Absent just because it has not been read yet.
+* The agent's screen records the log-in **at once**, without waiting for any list: it checks the saved record of the shift first
+  (the first log-in of the day is still never replaced by a later one), then saves, and retries every 20 s until it is saved.
+* The log-in time is when the agent signed in (also after reopening PAT with the saved sign-in, if the page was open until just
+  before), so lateness and attendance % are right.
+* Test: `tests/live_attendance.js` (an agent signs in / reopens PAT; the manager screen stops showing Absent within seconds, with
+  the right log-in time).
