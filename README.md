@@ -1235,3 +1235,142 @@ download had arrived.
   before), so lateness and attendance % are right.
 * Test: `tests/live_attendance.js` (an agent signs in / reopens PAT; the manager screen stops showing Absent within seconds, with
   the right log-in time).
+
+## Playful style, faces next to names, tool links by case type (Nov 25)
+* **Playful style** (on by default; Settings → Theme → *✨ Playful style*, per screen): rounded tiles and cards, soft shadows,
+  little bounces on hover, Nunito / Baloo 2 lettering. Only shapes, shadows, lettering and motion change: every colour still comes
+  from the selected colour theme or image skin, and seasonal themes (snow, lights, garlands, Santa…) are untouched. With a
+  non-default font chosen in the theme, that font is kept. Motion is off for screens set to reduce motion or with effects off.
+* **Faces:** the face each person claimed on the team picture now shows next to their name at the top, and next to the case
+  owner in the cases table (initials as before when no face is claimed).
+* **Tool links (Settings → 🧰 Tools, managers and coordinators):** each tool has a name, emoji, colour (or the theme colour), the
+  **case types** it is used for (Aruba, AT&T, Foundation) and a link with case fields in curly brackets: `{sfdc}` (first HPE Case
+  ID), `{arubaNo}`, `{attNo}`, `{ritm}`, `{store}`, `{account}`, `{model}`, `{id}`. Every case of those types shows the tools as
+  tiles at the top of the case window, already pointing at that case, opening in a new tab; a tile whose number is still empty is
+  greyed out ("needs …"). A *Copy IDs* tile copies the case numbers. Optional "Tool opened" line in Case History. *Test with a
+  case* shows the exact links. Saved as you type (config/tools) and on every screen. No tools set up = nothing shown.
+* Test host (`tests/live_host.py`) now also serves the login picture, so faces can be checked locally.
+* (Nov 25, 14:40) **Playful case window and Settings**, in the style of the tool tiles: soft bubbles in the window headers, section
+  headers as rounded pills with the icon in a white bubble, the owner box and top bar as dashed "shelves", checklist items as
+  rounded cards (required ones soft yellow, done ones a soft tint of the theme), a striped progress bar, pill-shaped buttons, and
+  Settings tabs as pill buttons (the open tab filled with the theme colour) with a little theme-coloured underline under each
+  heading. Styling only (one style hook added to checklist rows); colours come from the theme, image skins and seasonal
+  decorations are kept, and it switches off with *Playful style* in Settings → Theme.
+
+## Nov 25 (22:50): maintenance window column, sound upload fix, report builder for everyone, time notes, refresh message, stability
+* **Cases table:** a *Maintenance Window* column beside *Next Reminder* with the current window's start and end (as entered;
+  "not set" when the end is still open). Scroll the table sideways on smaller screens.
+* **Alert sound upload fixed:** a sound shared by a manager/coordinator was only loaded the first time an alert needed it, so the
+  first alerts (and Preview on other screens) played the built-in tone. Shared sounds now load as soon as the alert settings arrive.
+  A sound kept on one device was stored in the browser's small text storage, which audio overflows (lost after closing); it is now
+  kept in the browser's file storage. Upload errors are now shown. Limit: 3 MB per sound.
+* **Report builder for everyone:** agents get a *🛠 Report builder* tab in Settings (pick columns, download the Excel, use saved
+  templates). Saving / removing templates stays with managers and coordinators. Their other reports are unchanged.
+* **Notes:** the maintenance window says to enter it in the customer's local time or EST; the checklist says alarms and reminders
+  are in Manila time.
+* **Refresh message:** when PAT is updated, open pages show a large red message across the top of the screen with a *Refresh now*
+  button. Pages no longer reload by themselves (that automatic reload, added Nov 24, interrupted people and looked like a crash).
+* **Stability (server memory):** the attendance queries now use whole days, so every screen asks the same question and the server
+  keeps one copy of the answer instead of one per screen, and there is now a cap on everything the server keeps in its read cache
+  together. Running out of memory makes Streamlit Cloud restart the app, which every open page sees as a crash/reload.
+* Tests: `tests/live_sound_upload.js` (new), `tests/live_new_version.js` (now checks the red message and that nothing reloads by
+  itself), new checks in `tests/feature_checks.js`.
+
+## Fix: checklist items and alarms not showing / disappearing (Nov 25, 23:20)
+**Cause:** when two screens worked on the same case at about the same time (for example the owner adding an item or setting an
+alarm while someone else, or the hand-over screen, saved another change), the later save sent that screen's own copy of the whole
+checklist and wiped the items and alarms the other screen had just added. With realtime saving (every quarter second) and the
+hand-over queue moving cases, this happened more often. Reproduced with two screens (`tests/live_checklist_merge.js`).
+* A save now sends only the fields changed on that screen, so it never overwrites someone else's newer change to another field.
+* The checklist (and work / part orders) is merged item by item: on the screen, and again on the server in one step, so two screens
+  saving at the same moment keep each other's items, alarms, ticks and edits; an item deleted on a screen stays deleted.
+* Older checklist items saved without an id now get the same id on every screen (and on the server), so they can be matched.
+* Items and alarms already wiped before this update cannot be brought back by the app; their Case History lines ("Item added",
+  "Reminder set") still show what was there.
+* All earlier updates are kept. Tests: `tests/live_checklist_merge.js` (new), new checks in `tests/feature_checks.js` and
+  `tests/test_frame.py`.
+
+## THD / Non-THD lift, Excel for everyone in the report builder (Nov 26)
+* **Lift type:** ticking *Lift required* in a case opens a small question: **THD lift** or **Non-THD lift** (Cancel leaves it as it
+  was). The case shows e.g. "Lift required (Yes - THD lift)" with a *change* link; unticking clears it. Case History logs it. The
+  weekly report (and the report builder's *Lift Required?* column) shows **Yes - THD lift**, **Yes - Non-THD lift**, **Yes** (older
+  cases with no type) or **No**. The bulk upload understands "Yes - THD" / "Yes - Non-THD" in the Lift column.
+* **Excel for everyone:** the *🛠 Report builder* tab (agents) downloads the builder Excel and now also has *Download weekly report
+  (Excel)*. Checked with an agent screen.
+* **Hand-over queue:** who sent a case to the queue is now saved with the case, so every screen applies "not back to the sender in
+  the same shift" (it was only known on the screen that moved it).
+* **Realtime updates re-checked** with two screens: a change (lift type) and typing in a case field reach the other screen within
+  about a second; reopen after reload, attendance, checklist merge and sound tests all pass.
+* Tests: `tests/live_lift_and_agent_excel.js` (new; uses `tests/mock_exceljs.js` because the Excel library comes from the internet),
+  new checks in `tests/feature_checks.js`.
+
+## Priority & SLA column, SLA in + Add Case, 3 handlers per case, checklist buttons (Nov 26, 04:00)
+* **Checklist:** the 🗑 delete button on each checklist item and the *⏰ Change reminder* button in the *Acknowledge Checklist
+  Item* pop-up are removed. Everything else on the item (Set reminder ⏰, Edit ✎, Acknowledge) is unchanged.
+* **Priority & SLA column** (case list, right after *Account Name*): shows **High priority / Standard** (moved out of the
+  *Status* column, which keeps severity, case status, Closed and Revisit) and the SLA: **NBD**, or **⚡ 4hr CTR / ⚡ 6hr CTR**
+  highlighted in amber. The *Status* filter still filters by High priority / Standard.
+* **SLA in + Add Case:** NBD · Next business day (default), 4hr call to repair, 6hr call to repair. It is saved on the case
+  (new field `slaT`; the existing `sla` field stays the SLA Met / Missed record), logged in Case History, changeable in the case
+  window next to the priority button, and available as *SLA Type (NBD / CTR)* in the report builder (not added to the weekly
+  report).
+* **3 handlers per case** (Settings → Shift Schedule, on by default; `config/hoq.chain`): a case is handled by at most three
+  people until closed — the first agent of each region who held it (APJ → EMEA → AMS; region from the agent's schedule). When
+  the hand-over queue deals a case, it goes back to that region's handler; an agent of a region that already has another handler
+  does not get it. The **5 cases per agent every hour** pacing and the order (high priority, overdue, nearest due) are unchanged;
+  new cases (round robin) are unchanged.
+  * Handler of the region on shift not online yet (later shift, already got 5 this hour, Unavailable): the case waits in the
+    queue — **unless the SLA would be missed** (reminder overdue or due within the hour, or a 4hr / 6hr CTR case): then an
+    available agent takes it temporarily.
+  * **Handler on leave / off today** (OFF, PTO, Absent or leave on the schedule): the **coordinator on duty** gets a pop-up
+    "Temporary case ownership" (case, priority, SLA, next reminder) with **Approve · take the case**, **Decline** and **Later**
+    (asks again in 10 min). Approved: the case moves to the coordinator as temporary owner (also on a day off on their schedule,
+    since they are on duty). Declined, no coordinator on duty, or no answer within 15 min on an urgent case: the next available
+    agent of that region takes it temporarily. Every step is logged in Case History.
+  * A temporary owner is not counted as a handler: once the handler is on shift again the case goes back to them through the
+    hand-over queue. The case window shows "Handled by: APJ … → EMEA … → AMS …" under the owner.
+  * Manual transfers are not restricted by this rule.
+* Tests: `tests/live_sla_and_handlers.js` (new), new checks in `tests/feature_checks.js` (regions stubbed so they don't depend on
+  the time of day). Realtime saving re-checked: SLA changes and the approval reach the other screen within seconds.
+
+## Approvals in one notification, Approve all, SLA tiles, new SLA colours (Nov 26, 04:45)
+* **Temporary case ownership** requests are no longer a pop-up: they show in the same corner notification as transfer approvals
+  (coordinator on duty), tagged *Temporary ownership*, with case, handler on leave, priority, SLA and next reminder, and
+  **Approve**, **Decline** and **Open case**. It stays there until answered (the old *Later* button is gone with the pop-up).
+  Approve / Decline do exactly what they did before.
+* **Approve all:** when more than one request is waiting, the notification shows **✔ Approve all (n)**. It approves every
+  waiting transfer request and temporary-ownership request one by one, with the same checks as the single buttons (for example a
+  transfer to someone who is off today still stays with its owner, logged). Single Approve / Reject per request is unchanged.
+* **SLA tiles:** + Add Case picks the SLA with three tiles (NBD · Next business day, ⚡ 4hr CTR, ⚡ 6hr CTR; NBD selected by
+  default) instead of radio buttons; the case window uses small tiles instead of the dropdown. Typed fields are kept when a tile
+  is tapped.
+* **SLA colours:** 4hr CTR solid purple, 6hr CTR light purple with a purple ring (was amber), NBD light blue.
+* Tests: `tests/feature_checks.js` and `tests/live_sla_and_handlers.js` updated.
+
+## Case status beside severity, smaller text, readable profile name, playful alarm pop-ups (Nov 26, 08:50)
+* **Case window header:** *Case status* is now a field like *Severity* (label above the box) on the same line; the *CSR only* tag
+  sits next to its label. The priority button, SLA tiles and Case ID were made a little more compact so the whole row fits.
+* **Text size:** the whole app is a little smaller (base 14px → 13px, phones 13.5px → 12.75px). The *Text size* setting in
+  Settings → Theme still scales from there.
+* **Profile name (top right):** the pill now has its own dark see-through background and always white text, so it stays readable
+  on every colour theme, image skin and seasonal look.
+* **Alarm pop-ups** (reminder alarms, *Acknowledge Checklist Item*, monitoring alerts, owner notifications, scheduled alerts, the
+  test alert) and the approval notification got the playful look: bouncy pop-in, a ringing squircle icon, a sticker line
+  ("Ding ding! Time to check ⏰", "Psst… a little note for you 💌" …), confetti dots, dashed details box, chunky pill buttons and
+  a dotted, blurred backdrop. Colours still follow the theme; the Christmas lights and elves now wait for the pop-in to finish
+  before they hang on the card edge. Content, buttons and sounds are unchanged; with the playful style switched off they look
+  as before.
+* Tests: new checks in `tests/feature_checks.js`; `tests/shim_integration.js` expects the new text size.
+
+## Several revisits per case, readable logout and settings buttons (Nov 26, 09:20)
+* **Revisits:** after the first revisit is saved, the Revisit section shows **＋ Add another revisit**. It opens the same fields
+  (reason tiles, *Other* reason, Task ID, documentation) and adds *Revisit #2, #3…*, each with **Edit** and **Remove** and who
+  added it and when. Case History logs *Revisit added / updated / removed*.
+  * The first revisit stays in `c.revisit` (lists, filters and the dashboard work as before); the next ones are saved in the new
+    field `rvMore`. Removing #1 keeps the others (the next becomes #1); removing the last one clears the tag as before.
+  * The case list shows **↻ Revisit ×n** when there is more than one; the report builder's *Revisit Reason* and *Revisit Task ID*
+    list every revisit ("Customer; DOA").
+  * A half-typed added revisit is kept like other drafts (survives a reload) and changes reach other screens in realtime.
+* **Log out and ⚙ Settings (top right):** same treatment as the profile name — their own dark see-through background, white
+  text/icon and a light outline, so they stay readable on every colour theme, image skin and seasonal look.
+* Tests: `tests/live_multi_revisit.js` (new), new checks in `tests/feature_checks.js`.

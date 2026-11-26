@@ -20,6 +20,7 @@ import base64
 import collections
 import copy
 import gzip
+import hashlib
 import hmac
 import json
 import os
@@ -38,6 +39,7 @@ BOOT_LIMIT = 3000                       # documents per collection sent with the
 BOOT_TOP = {"act": 1000, "cases": 1000}  # growing collections: only the newest N (by ts) go with the first render — what the page shows
 VERS_TTL = 2.0                          # seconds the change counters are served from memory before MongoDB is asked again
 READ_CACHE_MAX = 200                    # cached read results (each is dropped as soon as its collection changes)
+READ_CACHE_TOTAL = 30000                # documents kept in all cached answers together (Nov 25)
 READ_CACHE_DOCS = 3000                  # results bigger than this are never cached (a month of history for a report)
 PUSH_MAX_DOCS = 1500                    # a changed collection up to this size is sent along with the change signal
 PUSH_MAX_BYTES = 1_500_000              # ... and only if it is this small as JSON (big answers made slow connections drop)
@@ -563,8 +565,12 @@ class MongoStore(MemStore):
                 self._reads.pop(k, None)
             if len(self._reads) >= READ_CACHE_MAX:
                 self._reads.clear()
+            # Nov 25: a cap on everything kept together (not only per answer), so kept answers can never fill the app's memory
+            total = sum(h[2] for h in self._reads.values() if len(h) > 2)
+            if total + n > READ_CACHE_TOTAL:
+                self._reads.clear()
             if n <= READ_CACHE_DOCS and int((self._vers or {}).get(key[1], 0)) == v:   # small and not changed while reading
-                self._reads[key] = (v, val)
+                self._reads[key] = (v, val, n)
         return val
 
     def get(self, c, i):
@@ -734,6 +740,58 @@ def _bridge_db(store: Any) -> Any:   # IM•LOGIC bridge: the thread lives in PE
     return db
 
 
+_MERGE_LOCK = threading.Lock()
+
+
+def _hstr(t: str) -> str:
+    """The same short code as hstr() in the page (djb2 over UTF-16 code units, unsigned, base 36)."""
+    h = 5381
+    b = str(t).encode("utf-16-le")
+    for k in range(0, len(b), 2):
+        h = ((h << 5) + h + (b[k] | (b[k + 1] << 8))) & 0xFFFFFFFF
+    digits, out = "0123456789abcdefghijklmnopqrstuvwxyz", ""
+    while True:
+        h, m = divmod(h, 36)
+        out = digits[m] + out
+        if not h:
+            return out
+
+
+def _with_ids(items: List[Any]) -> List[Any]:
+    """Older checklist items saved without an id get the same id the page gives them ('i' + code of 'index|text')."""
+    for ix, x in enumerate(items):
+        if isinstance(x, dict) and not x.get("id"):
+            t = x.get("text")
+            t = t if isinstance(t, str) else ("" if t is None else str(t))
+            x["id"] = "i" + _hstr(f"{ix}|{t}")
+    return items
+
+
+def merge_by_id(base: List[Any], srv: List[Any], loc: List[Any]) -> List[Any]:
+    """Three-way merge of a list of {id: ...} entries: changes made on this screen (loc vs base) applied to the saved copy (srv)."""
+    key = lambda x: x.get("id") if isinstance(x, dict) else None  # noqa: E731
+    B = {key(x): x for x in base if key(x)}
+    L = {key(x): x for x in loc if key(x)}
+    S = {key(x): x for x in srv if key(x)}
+    out: List[Any] = []
+    for x in srv:
+        k = key(x)
+        if not k:
+            out.append(x)
+            continue
+        if k in L:
+            out.append(x if (k in B and L[k] == B[k]) else L[k])
+        elif k not in B:
+            out.append(x)                       # added on another screen
+    for x in loc:
+        k = key(x)
+        if not k or k in S:
+            continue
+        if k not in B or x != B[k]:
+            out.append(x)                       # added here
+    return out
+
+
 def execute(store: MemStore, op: str, a: Dict[str, Any]) -> Any:
     """Run one request from the browser. Same semantics as the original REST API."""
     a = a or {}
@@ -773,7 +831,20 @@ def execute(store: MemStore, op: str, a: Dict[str, Any]) -> Any:
         return {"id": i, "version": store.version(c)}
     if op == "patch":
         c, i = _coll(a.get("c")), _id(a.get("id"))
-        if not store.patch(c, i, _body(a.get("data"))):
+        data = _body(a.get("data"))
+        mb = data.pop("__mb", None) if isinstance(data, dict) else None
+        if isinstance(mb, dict) and mb:
+            # Nov 25: checklist items / orders changed on a screen are merged item by item with the copy saved right now, in one
+            # step, so two screens saving at the same moment can never wipe each other's items or alarms.
+            with _MERGE_LOCK:
+                cur = store.get(c, i) or {}
+                for f, base in mb.items():
+                    if f in data and isinstance(data[f], list) and isinstance(base, list) and isinstance(cur.get(f), list):
+                        data[f] = merge_by_id(base, _with_ids(copy.deepcopy(cur[f])), data[f])
+                ok = store.patch(c, i, data)
+        else:
+            ok = store.patch(c, i, data)
+        if not ok:
             raise ApiError("not_found", "Document not found")
         return {"id": i, "version": store.version(c)}
     if op == "delete":
@@ -891,7 +962,7 @@ class Bridge:
         if not down and isinstance(self.err, str) and ("DbDown" in self.err or "AutoReconnect" in self.err):
             self.err = None                        # the connection is back: clear the old notice
         base = {"now": now_ms(), "ok": self.err is None and not down, "err": self.err, "store": self.store.kind,
-                "vers": vers, "down": down}
+                "vers": vers, "down": down, "build": getattr(self, "build", "") or APP_BUILD}
         if not msg:
             boot = None
             try:
@@ -961,11 +1032,16 @@ def absorb(bridge: Bridge, prev: Optional[Dict[str, Any]], value: Optional[Dict[
 
 
 # ============================================================================= Streamlit UI
+APP_BUILD = ""   # Nov 24: a fingerprint of the page this server hands out; a page left open with an older one reloads quietly
+
+
 def build_frontend() -> str:
     """Write the component page (the app HTML with the shim injected) and return its directory."""
+    global APP_BUILD
     html = (ROOT / "web" / "pet_station.html").read_text(encoding="utf-8")
     shim = (ROOT / "web" / "shim.js").read_text(encoding="utf-8")
-    page = html.replace("<head>", "<head><script>" + shim.replace("</script", "<\\/script") + "</script>", 1)
+    APP_BUILD = hashlib.sha1((html + shim).encode("utf-8")).hexdigest()[:12]
+    page = html.replace("<head>", "<head><script>window.__PET_BUILD=" + json.dumps(APP_BUILD) + ";" + shim.replace("</script", "<\\/script") + "</script>", 1)
     d = pathlib.Path(tempfile.gettempdir()) / "pet_station_component"
     d.mkdir(parents=True, exist_ok=True)
     # Faster opening: the two built-in login pictures (about 0.75 MB of text inside the page) become separate image files
@@ -986,6 +1062,12 @@ def build_frontend() -> str:
     if not f.exists() or f.read_text(encoding="utf-8") != page:
         f.write_text(page, encoding="utf-8")
     return str(d)
+
+
+def frontend_info() -> Tuple[str, str]:
+    """The page's directory and its fingerprint (built once per server start)."""
+    d = build_frontend()
+    return d, APP_BUILD
 
 
 def main() -> None:
@@ -1055,7 +1137,9 @@ def main() -> None:
     if store_err:
         slot.error(store_err)
 
-    component = components.declare_component("pet_station", path=st.cache_resource(show_spinner=False)(build_frontend)())
+    fe_dir, fe_build = st.cache_resource(show_spinner=False)(frontend_info)()
+    component = components.declare_component("pet_station", path=fe_dir)
+    bridge.build = fe_build   # answers carry the page fingerprint (an older open page reloads quietly when idle)
 
     # Speed: the browser talks to the server about once a second. Inside a fragment, each of those messages re-runs only
     # this small part of the page (not the whole script, sidebar and styles), so answers come back faster and nothing on the
