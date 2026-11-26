@@ -1374,3 +1374,11 @@ hand-over queue moving cases, this happened more often. Reproduced with two scre
 * **Log out and ⚙ Settings (top right):** same treatment as the profile name — their own dark see-through background, white
   text/icon and a light outline, so they stay readable on every colour theme, image skin and seasonal look.
 * Tests: `tests/live_multi_revisit.js` (new), new checks in `tests/feature_checks.js`.
+
+## Absent agents get no cases until available (Nov 26, 11:45)
+* An agent shown as **Absent** in Agent Status (on shift but not logged in to PAT, or *Absent* on the schedule) gets no cases until
+  they log in / become available. Round robin, the hand-over queue and balancing already left them out; now a **transfer by
+  hand**, a **bulk transfer** and an **approved transfer request** are refused too ("… is marked Absent: cases can't be assigned
+  to them until they're available"), the bulk-transfer list shows them as *(absent)* and disabled, and an approved request logs
+  that the case stays with its owner. As soon as they log in, they can receive cases again.
+* Tests: new checks in `tests/feature_checks.js`.
