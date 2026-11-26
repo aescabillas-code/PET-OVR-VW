@@ -103,14 +103,15 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
 
   // ---------- shift schedule: person + info saved to the database, even with fast edits ----------
   A.run('setTabTo("shift")');
+  A.run("window.wkSet=(i,d,v)=>{const p=STAFF[i],x=parseCell(v);if(!Array.isArray(p.sch))p.sch=mkSch(p);p.sch[d]=x;sDerive(p);sRefresh()}");   // test helper: one weekday of the weekly pattern
   A.run('sAdd()');
   const newName = A.run('STAFF[STAFF.length-1].name');
   for (let i = 0; i < 7; i++) {                       // rapid edits, spaced so earlier saves echo back in between
     await sleep(i % 2 ? 140 : 520);
     if (i === 0) A.run(`sRename(STAFF.length-1,'Zed Tester')`);
-    else A.run(`sSet(STAFF.length-1,${i - 1},'0${i}:00-1${i}:00')`);
+    else A.run(`wkSet(STAFF.length-1,${i - 1},'0${i}:00-1${i}:00')`);
   }
-  A.run(`sSet(STAFF.length-1,6,'PTO')`);
+  A.run(`wkSet(STAFF.length-1,6,'PTO')`);
   await sleep(3000);
   const exp = J(A.run('JSON.stringify(STAFF[STAFF.length-1].sch)'));
   check('A keeps all its own schedule edits', A.run('STAFF[STAFF.length-1].name') === 'Zed Tester' && exp[6] === 'PTO' && exp[5] === '06:00-16:00', JSON.stringify(exp));
@@ -530,7 +531,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   A.run("startSim()");
   check('simulation shows a case with a maintenance window start but no end', A.run('CASES[1].mw&&CASES[1].mw.e') === null);
   check('simulation announcement carries a mention and a case tag', A.run("ANN.some(a=>a.simulation&&a.mentions&&a.mentions.length&&a.cases&&a.cases.length)") === true);
-  const ag = A.run("pool()[0].name"); A.run(`setUser(${JSON.stringify(ag)})`);
+  const ag = A.run("pool()[0].name"); A.run(`SIM_USER=${JSON.stringify(ag)};renderUser();render();annCheck()`);
   check('availability toggle is available while simulating an agent', A.run("!!availP()") === true);
   const st0 = A.run("availP().status"); A.run('toggleAvailability()');
   check('going unavailable first asks for a reason (nothing changes yet)', A.run("availP().status") === st0);
@@ -719,7 +720,6 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     // -- hand-over only at the start of the receiving agent's shift, shared evenly, never bounced back
     {
       const ho = (list) => { setStaff(list); };
-      A.run('window.__hc0=HO_CHAIN;HO_CHAIN=false');   // Nov 26: the even split itself; the 3-handler rule has its own time-independent checks
       ho([ag('Gone Gary', -540, -10), ag('Early Ed', -300, 240), ag('Later Lou', -300, 240)]);
       A.run("CASES.length=0;for(let i=0;i<6;i++)CASES.push(mkCase('HO-'+i,'Gone Gary',{}))");
       A.run('eosCheck()');
@@ -749,7 +749,6 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
       A.run('eosCheck();eosCheck();rebalanceEos(simNow())');
       check('a manual hand-over to an agent who has not started yet stays put', J(A.run("JSON.stringify(CASES.map(c=>c.owner))")).join() === mo.join());
       check('manual hand-overs are marked so they are never taken back', A.run("CASES.every(c=>c.credit&&c.credit.man===true&&c.credit.manTo===c.owner)") === true);
-      A.run('HO_CHAIN=__hc0');
     }
     // -- automatic sign-out 20 minutes after end of shift
     const agOut = (name, passed) => ag(name, -480 - passed, -passed);
@@ -1251,10 +1250,10 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('at EOS the cases are divided equally between the agents online (3 and 3), not by who has fewest', L('Gone Gail') === 0 && L('Busy Ben') === 13 && L('Free Fran') === 3 && L('Away Al') === 0);
     // credit: every handler counts
     A.run("window.__cr=credsOf(getCase('EQ-G0')).map(x=>x.n).join()");
-    check('productivity: the new-case owner always counts; the hand-over receiver only after updating the case', A.run('__cr').split(',').includes('Gone Gail') && A.run('__cr').split(',').length === 2 && A.run("dayN('Gone Gail',simNow())") === 6 && A.run("prodCredsOf(getCase('EQ-G0')).length") === 1);
+    check('productivity: the new-case owner always counts; the hand-over receiver only after updating the case', A.run('__cr').split(',').includes('Gone Gail') && A.run('__cr').split(',').length === 2 && A.run("dayN('Gone Gail',simNow())") === 6 && A.run("(c=>credsOf(c).filter(x=>x.n===credOf(c).n||workedBy(c,x.n)))(getCase('EQ-G0')).length") === 1);
     A.run("{const c=getCase('EQ-G0');window.__o=c.owner;ME={role:'agent',name:c.owner};applyMe();cdSet('EQ-G0','model','HPE DL380')}");
     check('adding information is written to the case history', A.run("getCase('EQ-G0').log.some(l=>l.action==='Model number updated'&&l.by===__o&&/DL380/.test(l.details))") === true);
-    check('after updating it, the hand-over case counts in the receiver\'s productivity', A.run("prodCredsOf(getCase('EQ-G0')).some(x=>x.n===__o)") === true);
+    check('after updating it, the hand-over case counts in the receiver\'s productivity', A.run("(c=>credsOf(c).filter(x=>x.n===credOf(c).n||workedBy(c,x.n)))(getCase('EQ-G0')).some(x=>x.n===__o)") === true);
     A.run("ME={role:'manager',name:'Jeff Bote'};applyMe()");
     // nobody online at EOS: stays, then moves to the first available
     st([ag('Gone Gail', -540, -5), ag('Away Al', -100, 300, 'unavailable')]);
@@ -1641,7 +1640,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('editing one day of the month saves it by date', A.run("pers('Dee New').msch['2026-12-04']") === 'PTO');
     // region backtracked from the monthly schedule
     A.run("pers('Ms Amy').msch=Object.assign({},pers('Ms Amy').msch,{'2026-10-05':'14:00-23:00','2026-10-06':'14:00-23:00','2026-11-05':'06:00-15:00','2026-11-06':'06:00-15:00'})");
-    check('the region of an earlier month comes from that month\'s schedule (EMEA in December/October, APJ in November)', A.run("regionAt('Ms Amy',new Date('2026-10-10T12:00:00').getTime())") === 'EMEA' && A.run("regionFor('Ms Amy',new Date('2026-11-01T00:00:00').getTime(),new Date('2026-11-30T23:00:00').getTime())") === 'APJ');
+    check('the region of an earlier month comes from that month\'s schedule (EMEA in December/October, APJ in November)', A.run("regionAt('Ms Amy',new Date('2026-10-10T12:00:00').getTime())") === 'EMEA' && A.run("((n,f,t)=>regionMsch(pers(n),f,t)||regionNow(n))('Ms Amy',new Date('2026-11-01T00:00:00').getTime(),new Date('2026-11-30T23:00:00').getTime())") === 'APJ');
     // attendance: not logged in by the start = Absent (no cases); logging in clears it (late)
     A.run('STAFF=' + JSON.stringify([ag('At Amy', -120, 300), ag('At Ben', -120, 300), ag('At Cy', -540, -30)]) + ";STAFF.forEach(p=>p.sch=mkSch(p));ensureMgrs(STAFF);window.__db=DBON;window.__ga=GOT.att;DBON=true;GOT.att=1;ATT_SINCE=Date.now()-45*864e5;ATT={};ATT[attId('At Ben',dkey(wall(Date.now())))]={in:Date.now()-150*6e4}");
     check('an agent on shift who has not logged in to PAT is Absent and gets no cases', A.run("isAbsentNow(pers('At Amy'),simNow())") === true && A.run("onlineAgents(simNow()).map(p=>p.name).join()") === 'At Ben' && A.run("coverFor(simNow(),null,undefined,true)") === 'At Ben');
@@ -1794,7 +1793,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     const st = l => A.run('STAFF=' + JSON.stringify(l) + ';ensureMgrs(STAFF);STAFFLOADED=true');
     const L = n => A.run(`CASES.filter(c=>!c.closed&&c.owner===${JSON.stringify(n)}).length`);
     const ago = (n, min) => A.run(`CASES.forEach(c=>{(c.ownh||[]).forEach((x,i,a)=>{if(i&&a[i-1].n===HOQ&&x.n===${JSON.stringify(n)})x.at-=${min}*6e4})})`);
-    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();window.__ao=ATT_OFF;ATT_OFF=true;window.__stf=STAFF;window.__cs=CASES.slice();window.__me=ME;window.__hc=HO_CHAIN;HO_CHAIN=false");   // (Nov 26: the 3-handler rule is checked in its own block below) log-ins are not part of these checks; the schedule and cases are put back after
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();window.__ao=ATT_OFF;ATT_OFF=true;window.__stf=STAFF;window.__cs=CASES.slice();window.__me=ME");   // log-ins are not part of these checks; the schedule and cases are put back after
     st([ag('Hq Gail', -540, -5), ag('Hq Amy', -100, 300), ag('Hq Ben', -100, 300)]);
     A.run("CASES.length=0;for(let i=0;i<12;i++)CASES.push(mkCase('HQ-'+String(i).padStart(2,'0'),'Hq Gail',{}))");
     A.run('eosCheck()');
@@ -1863,11 +1862,11 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run("getCase('HB-1').hoq.at=Date.now()-2*864e5;eosCheck()");
     check('... but from their next shift on they can (a case open for days that every agent already had still goes out)', A.run("getCase('HB-1').owner") === 'Hq Fay', A.run("getCase('HB-1').owner"));
     A.run("Object.keys(ST).filter(k=>/^(HQ|P|HW|HM|HB|HT|HO|LF)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");   // these test cases are not saved
-    A.run('ATT_OFF=__ao;STAFF=__stf;CASES.length=0;__cs.forEach(c=>CASES.push(c));ME=__me;applyMe();HO_CHAIN=__hc');
+    A.run('ATT_OFF=__ao;STAFF=__stf;CASES.length=0;__cs.forEach(c=>CASES.push(c));ME=__me;applyMe()');
   }
   // ---------- Nov 26: checklist buttons, Priority & SLA column, 3 handlers per case ----------
   {
-    check('the per-item delete button is gone from the checklist', !htmlSrc.includes(`<button onclick="delItem(`) && htmlSrc.includes('function delItem('));
+    check('the per-item delete button is gone from the checklist', !htmlSrc.includes(`<button onclick="delItem(`) && !htmlSrc.includes('function delItem('));
     check('the Acknowledge modal has no Change reminder button', !htmlSrc.includes('⏰ Change reminder</button>'));
     check('SLA type is saved with the case (slaT), separate from SLA Met/Missed', A.run("CX.includes('slaT')&&CXD.slaT===''&&CX.includes('sla')") === true);
     check('SLA labels: NBD / 4hr / 6hr call to repair', A.run("SLA_T.map(x=>x[1]).join('|')") === 'NBD · Next business day|4hr call to repair|6hr call to repair');
@@ -1885,62 +1884,23 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run("slaSet('SLA-1','NBD')");
     check('SLA can be changed in the case window (logged)', A.run("getCase('SLA-1').slaT") === 'NBD' && A.run("getCase('SLA-1').log.some(l=>l.action==='SLA updated')") === true && htmlSrc.includes(`slaTiles(c.slaT||'',"slaSet('"+c.id+"',"`));
     check('SLA type is available in the report builder', A.run("RF('slaT').g({slaT:'6H'})") === '6hr call to repair' && A.run("WEEKLY.includes('slaT')") === false);
-    // 3 handlers: regions are stubbed so the checks do not depend on the time of day
+    // shared helpers for the checks below (the 3-handler rule was reverted on Nov 26, 18:40)
     const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
     const nowM = A.run('minOf(simNow())');
     const ag = (name, a, b, st) => ({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: st || 'available' });
-    const L = n => A.run(`CASES.filter(c=>!c.closed&&c.owner===${JSON.stringify(n)}).length`);
-    A.run("window.__ao2=ATT_OFF;ATT_OFF=true;window.__stf2=STAFF;window.__rg=rgOf;window.__cod=COD;HO_CHAIN=true;rgOf=n=>({'Ch Apj':'APJ','Ch Apj2':'APJ','Ch Emea':'EMEA','Ch Emea2':'EMEA','Ch Ams':'AMS','Ch Cod':'APJ'})[n]||''");
+    A.run("window.__ao2=ATT_OFF;ATT_OFF=true;window.__stf2=STAFF;window.__cod=COD");
     const st = l => A.run('STAFF=' + JSON.stringify(l) + ';ensureMgrs(STAFF);STAFFLOADED=true');
-    const mk = (id, hist, extra) => A.run(`(()=>{const c=mkCase(${JSON.stringify(id)},${JSON.stringify(hist[0])},{});c.owner=HOQ;c.ownh=${JSON.stringify(hist)}.concat(['Hand-over Queue']).map((n,i)=>({n,at:Date.now()-(9-i)*36e5}));c.credits=[];c.hoq={from:${JSON.stringify(hist[hist.length - 1])},at:Date.now()-60000};Object.assign(c,${JSON.stringify(extra || {})});CASES.push(c)})()`);
-    // APJ handler sends to the queue; EMEA agents online: the EMEA slot is free, so an EMEA agent takes it
-    st([ag('Ch Apj', -540, -5), ag('Ch Emea', -60, 400), ag('Ch Emea2', -60, 400)]);
-    A.run("CASES.length=0");mk('CH-1', ['Ch Apj']);A.run('eosCheck()');
-    check('3 handlers: APJ → the next region (EMEA) takes the case from the queue', ['Ch Emea', 'Ch Emea2'].includes(A.run("getCase('CH-1').owner")));
-    const em = A.run("getCase('CH-1').owner");
-    // the case came back to the queue: the EMEA handler gets it again, not the other EMEA agent
-    A.run(`(()=>{const c=getCase('CH-1');reassign(c,HOQ,'test');c.hoq={from:'Ch Ams',at:Date.now()-864e5}})()`);
-    st([ag('Ch Apj', -540, -5), ag('Ch Emea', -60, 400), ag('Ch Emea2', -60, 400), ag('Ch Apj2', -60, 400)]);
-    A.run(`(()=>{const c=getCase('CH-1');c.ownh=c.ownh.map(x=>x.at>Date.now()-6e5?{...x,at:x.at-3*36e5}:x).concat([{n:'Ch Ams',at:Date.now()-2*36e5},{n:HOQ,at:Date.now()-36e5}]);c.items.forEach(i=>{i.rem=null})})()`);
-    A.run("eosCheck()");
-    check('... a case only goes back to the same handler of that region (no 4th person)', A.run("getCase('CH-1').owner") === em && A.run("JSON.stringify(chainOf(getCase('CH-1')))").includes('Ch Ams'), A.run("getCase('CH-1').owner"));
-    // handler of the region not online and nothing urgent: it waits; SLA at risk (4hr CTR): another agent takes it temporarily
-    st([ag('Ch Apj', -540, -5), ag('Ch Emea', 120, 600), ag('Ch Emea2', -60, 400), ag('Ch Ams', -900, -600)]);
-    A.run("CASES.length=0");mk('CH-2', ['Ch Apj', 'Ch Emea', 'Ch Ams'], { slaT: 'NBD' });A.run("getCase('CH-2').items.forEach(i=>{i.rem=null});eosCheck()");
-    check('... handler starts later and the SLA is not at risk: the case waits for them in the queue', A.run("getCase('CH-2').owner") === 'Hand-over Queue');
-    A.run("getCase('CH-2').slaT='4H';eosCheck()");
-    check('... 4hr / 6hr CTR (or due within the hour): an available agent takes it temporarily to avoid a missed SLA', A.run("getCase('CH-2').owner") === 'Ch Emea2' && A.run("getCase('CH-2').tmp.st") === 'ok' && A.run("getCase('CH-2').tmp.for") === 'Ch Emea' && A.run("chainOf(getCase('CH-2')).EMEA") === 'Ch Emea');
-    // the handler is back online: the case returns to them through the queue
-    st([ag('Ch Emea', -60, 400), ag('Ch Emea2', -60, 400)]);
-    A.run("eosCheck()");
-    check('... once the handler is on shift the temporary owner hands it back (through the queue, logged)', A.run("getCase('CH-2').owner") === 'Ch Emea' && A.run("getCase('CH-2').log.some(l=>/Temporary ownership ended/.test(l.details||''))") === true, A.run("getCase('CH-2').owner"));
-    // handler on leave: the coordinator on duty is asked to approve temporary ownership
-    const lv = ag('Ch Emea', -60, 400); lv.msch = {}; 
-    st([ag('Ch Apj', -540, -5), Object.assign(ag('Ch Emea', -60, 400), { status: 'available' }), ag('Ch Emea2', -60, 400), ag('Ch Cod', -60, 400, 'unavailable')]);
-    A.run("pers('Ch Emea').msch={[dkey(wall(simNow()))]:'PTO',[dkey(dayBefore(wall(simNow())))]:'OFF'};COD={cur:{n:'Ch Cod',from:Date.now()-36e5},hist:[]}");
-    A.run("CASES.length=0");mk('CH-3', ['Ch Apj', 'Ch Emea']);A.run("getCase('CH-3').items.forEach(i=>{i.rem=null});eosCheck()");
-    check('... handler on leave: the case waits and the coordinator on duty is asked to approve temporary ownership (logged)', A.run("getCase('CH-3').owner") === 'Hand-over Queue' && A.run("getCase('CH-3').tmp.st") === 'ask' && A.run("getCase('CH-3').tmp.to") === 'Ch Cod' && A.run("getCase('CH-3').log.some(l=>l.action==='Temporary ownership requested')") === true, A.run("JSON.stringify(getCase('CH-3').tmp)"));
-    A.run("eosCheck()");
-    check('... it is asked once and the case is not given to another agent meanwhile', A.run("getCase('CH-3').owner") === 'Hand-over Queue' && A.run("getCase('CH-3').log.filter(l=>l.action==='Temporary ownership requested').length") === 1);
-    A.run("NOTICE_OPEN=false;remOpen=false;TMP_OPEN='';ME={role:'agent',name:'Ch Cod',coord:true};tmpAskCheck()");
-    { const xp = String(A.els['xreq-pop'].innerHTML); check('... the coordinator gets it in the same corner notification as transfer approvals (not a pop-up)', xp.includes('Temporary ownership') && xp.includes(`tmpAnswer(1,'CH-3')`) && A.run("NOTICE_OPEN") === false); }
-    A.run("tmpAnswer(1,'CH-3')");
-    check('... approved: the case moves to the coordinator as temporary owner (not a handler)', A.run("getCase('CH-3').owner") === 'Ch Cod' && A.run("getCase('CH-3').tmp.st") === 'ok' && !A.run("JSON.stringify(chainOf(getCase('CH-3')))").includes('Ch Cod'));
-    A.run("CASES.length=0");mk('CH-4', ['Ch Apj', 'Ch Emea']);A.run("getCase('CH-4').items.forEach(i=>{i.rem=null});eosCheck();tmpAnswer(0,'CH-4');eosCheck()");
-    check('... declined: the next available agent of that region takes it temporarily', A.run("getCase('CH-4').owner") === 'Ch Emea2' && A.run("getCase('CH-4').log.some(l=>l.action==='Temporary ownership declined')") === true, A.run("getCase('CH-4').owner"));
-    A.run("COD={cur:null,hist:[]};CASES.length=0");mk('CH-5', ['Ch Apj', 'Ch Emea']);A.run("getCase('CH-5').items.forEach(i=>{i.rem=null});eosCheck()");
-    check('... no coordinator on duty: the next available agent of that region takes it temporarily', A.run("getCase('CH-5').owner") === 'Ch Emea2' && A.run("getCase('CH-5').tmp.st") === 'ok');
-    // several requests: Approve all
-    A.run("COD={cur:{n:'Ch Cod',from:Date.now()-36e5},hist:[]};CASES.length=0");mk('CH-6', ['Ch Apj', 'Ch Emea']);mk('CH-7', ['Ch Apj', 'Ch Emea']);
-    A.run("CASES.forEach(c=>c.items.forEach(i=>{i.rem=null}));eosCheck();window.__xc=mkCase('XR-1','Ch Emea2',{});window.__xd=mkCase('XR-2','Ch Emea2',{});CASES.push(__xc,__xd);[__xc,__xd].forEach(c=>{c.xreq={to:'Ch Apj',by:'Jeff Bote',at:Date.now(),from:'Ch Emea2',cod:'Ch Cod'}});window.__su=SIM_USER;SIM_USER='Ch Cod';xreqRender()");
-    { const xp = String(A.els['xreq-pop'].innerHTML); check('more than one request waiting: the notification has Approve all', xp.includes('xreqApproveAll()') && xp.includes('Approve all (4)'), xp.slice(0, 300)); }
-    A.run("pers('Ch Apj').msch={};xreqApproveAll()");
-    check('... Approve all approves every transfer and temporary-ownership request', A.run("['CH-6','CH-7'].every(id=>getCase(id).owner==='Ch Cod')&&['XR-1','XR-2'].every(id=>!getCase(id).xreq&&getCase(id).log.some(l=>l.action==='Transfer approved'))") === true, A.run("JSON.stringify(CASES.map(c=>[c.id,c.owner,!!c.xreq]))"));
+    check('3 handlers per case reverted: no handler slots, temporary-ownership requests or Settings switch', !/function (chainOf|hoqChainPick|chainSync|tmpAnswer|tmSet)\(/.test(htmlSrc) && !htmlSrc.includes('id="hoq-chain"') && !htmlSrc.includes('HO_CHAIN') && A.run("CX.includes('tm')||CX.includes('tmp')") === false);
+    check('... the hand-over queue deals as before (5 per agent per hour, high priority / overdue / nearest due first)', A.run("HO_BATCH") === 5 && htmlSrc.includes("const r=on.filter(p=>got[p.name]<HO_BATCH&&!hoqBlocked(c,p,+now)).sort("));
+    // several transfer requests: Approve all
+    st([ag('Ch Apj', -60, 400), ag('Ch Emea2', -60, 400), ag('Ch Cod', -60, 400, 'unavailable')]);
+    A.run("COD={cur:{n:'Ch Cod',from:Date.now()-36e5},hist:[]};CASES.length=0;window.__xc=mkCase('XR-1','Ch Emea2',{});window.__xd=mkCase('XR-2','Ch Emea2',{});CASES.push(__xc,__xd);[__xc,__xd].forEach(c=>{c.xreq={to:'Ch Apj',by:'Jeff Bote',at:Date.now(),from:'Ch Emea2',cod:'Ch Cod'}});window.__su=SIM_USER;SIM_USER='Ch Cod';xreqRender()");
+    { const xp = String(A.els['xreq-pop'].innerHTML); check('more than one transfer request waiting: the notification has Approve all', xp.includes('xreqApproveAll()') && xp.includes('Approve all (2)') && xp.includes('Transfer approval needed (2)'), xp.slice(0, 300)); }
+    A.run("xreqApproveAll()");
+    check('... Approve all approves every transfer request', A.run("['XR-1','XR-2'].every(id=>!getCase(id).xreq&&getCase(id).owner==='Ch Apj'&&getCase(id).log.some(l=>l.action==='Transfer approved'))") === true, A.run("JSON.stringify(CASES.map(c=>[c.id,c.owner,!!c.xreq]))"));
     A.run("SIM_USER=__su;Object.keys(ST).filter(k=>/^XR-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
     check('... single Approve / Reject per request still there', htmlSrc.includes(`<button onclick="xreqApprove('\${c.id}')"`) && htmlSrc.includes(`<button onclick="xreqReject('\${c.id}')"`));
     check('SLA tiles in the case window too (no dropdown)', A.run("slaTiles('6H',\"slaSet('Z',\",'',true)").includes(`onclick="slaSet('Z','4H')"`) && !htmlSrc.includes(`<select onchange="slaSet(`));
-    check('... the 5-per-agent-per-hour pacing stays the same', A.run("HO_BATCH") === 5 && htmlSrc.includes("got[p.name]<HO_BATCH&&!hoqBlocked(c,p,+now)"));
-    check('... the rule can be switched off in Settings (Shift Schedule)', A.run("hoqSetHtml(false)").includes('id="hoq-chain"') && htmlSrc.includes("chain:HO_CHAIN"));
     // Nov 26 (08:50): case status beside severity, smaller text, readable profile pill, playful alarm pop-ups
     check('case status is a stacked field beside Severity (no push to its own line)', htmlSrc.includes(`<div class="cap mb-0.5 flex items-center gap-1.5 nw">Case status`) && !htmlSrc.includes(`<label class="flex items-center gap-2 sm:ml-auto"><span class="cap">Case status</span>`));
     check('app text a little smaller (13px base; theme text size still applies)', htmlSrc.includes('html{font-size:13px}') && htmlSrc.includes("'html{font-size:'+(13*sz/100)+'px}'"));
@@ -1980,8 +1940,8 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
       check('... bulk transfer list marks them (absent) and disables them', htmlSrc.includes("${dayOff(p)||absentNow(p)?'disabled':''}") && htmlSrc.includes("' (absent)'"));
       A.run("isAbsentNow=__ian;ATT_OFF=true;CASES.length=0;Object.keys(ST).filter(k=>/^AB-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
     }
-    A.run("COD={cur:null,hist:[]};xreqRender();hide('mention-modal');NOTICE_OPEN=false;TMP_OPEN='';Object.keys(ST).filter(k=>/^(CH|SLA)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
-    A.run("rgOf=__rg;COD=__cod;HO_CHAIN=true;ATT_OFF=__ao2;STAFF=__stf2;CASES.length=0;__cs2.forEach(c=>CASES.push(c));ME={role:'manager',name:'Jeff Bote'};applyMe()");
+    A.run("COD={cur:null,hist:[]};xreqRender();hide('mention-modal');NOTICE_OPEN=false;Object.keys(ST).filter(k=>/^(CH|SLA)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
+    A.run("COD=__cod;ATT_OFF=__ao2;STAFF=__stf2;CASES.length=0;__cs2.forEach(c=>CASES.push(c));ME={role:'manager',name:'Jeff Bote'};applyMe()");
   }
 
     check('54 min late on a 9-hour shift counts 90%', A.run('attCr(54,540)') === 0.9 && A.run('attCr(600,540)') === 0 && A.run('attCr(0,540)') === 1);

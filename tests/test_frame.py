@@ -88,3 +88,22 @@ def test_checklist_is_merged_on_the_server():
     assert [x["id"] for x in items] == [old_id, "a", "b", "c"]
     assert items[1].get("done") is True and items[2].get("rem") == {"at": 5}
     assert "__mb" not in st.get("cases", "C1")
+
+
+def test_first_answer_data_is_ready_before_the_page_asks():
+    """Nov 26 (faster opening): warm() reads and packs the first-answer data in the background; a page that opens then
+    gets that same packed text without new reads or packing."""
+    store = app.MemStore()
+    store.put("cases", "C1", {"id": "C1", "owner": "Amy"})
+    br = app.Bridge(store)
+    br.warm()
+    assert br._bootz is not None
+    packed = br._bootz[1]
+    calls = []
+    orig = store.snapshot
+    store.snapshot = lambda: (calls.append(1), orig())[1]
+    r = br.reply(None)
+    assert r["bootz"] == packed
+    br.start_warm(every=3600)
+    br.start_warm(every=3600)            # started only once
+    assert br._warm_t is not None and br._warm_t.daemon

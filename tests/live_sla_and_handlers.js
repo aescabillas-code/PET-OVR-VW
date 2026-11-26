@@ -1,6 +1,6 @@
 // Live (Nov 26): + Add Case sets the SLA (NBD / 4hr / 6hr CTR), the case list shows a Priority & SLA column, the checklist has
-// no per-item delete button and the Acknowledge pop-up has no Change reminder button; the coordinator on duty approves
-// temporary ownership on their own screen (3 handlers per case); changes reach the other screen (realtime unchanged).
+// no per-item delete button and the Acknowledge pop-up has no Change reminder button; changes reach the other screen
+// (realtime unchanged). (The 3-handler / temporary-ownership part was reverted on Nov 26, 18:40.)
 //   python3 tests/live_host.py . 8825 &   node tests/live_sla_and_handlers.js 8825 [screenshot-dir]
 const { chromium } = require('playwright'); const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
@@ -37,16 +37,6 @@ const { chromium } = require('playwright'); const sleep = ms => new Promise(r =>
   await A.evaluate(() => popClose()); await A.evaluate(() => openCaseModal('SLA-LIVE-1')); await sleep(300); await A.click('#case-body button[data-sla="6H"]'); await sleep(200);
   w = -1; for (let i = 0; i < 40; i++) { if (await B.evaluate(() => (getCase('SLA-LIVE-1') || {}).slaT === '6H')) { w = i * 250; break } await sleep(250) }
   check('changing the SLA in the case window reaches the other screen', w >= 0, w);
-  // temporary ownership: a request for the coordinator shown on B (signed in as that coordinator)
-  const cod = await A.evaluate(() => { const p = STAFF.find(x => !isMgr(x)); return p.name });
-  await A.evaluate(nm => { const c = getCase('SLA-LIVE-1'); reassign(c, HOQ, 'test', 'Jeff Bote'); c.tmp = { st: 'ask', to: nm, for: 'Someone Away', rg: 'EMEA', at: Date.now() }; queueSave(c); render() }, cod);
-  await B.evaluate(nm => { ME = { role: 'agent', name: nm, coord: true }; applyMe() }, cod);
-  w = -1; for (let i = 0; i < 40; i++) { if (await B.evaluate(() => { try { render() } catch (e) {} return !document.getElementById('xreq-pop').classList.contains('hidden') && document.getElementById('xreq-pop').textContent.includes('Temporary ownership') && document.getElementById('mention-modal').classList.contains('hidden') })) { w = i * 250; break } await sleep(250) }
-  check('the coordinator gets the temporary-ownership request in the corner notification (no pop-up)', w >= 0, w);
-  if (shots) await pb.screenshot({ path: shots + '/cod_popup.png' });
-  await B.click('#xreq-pop button:has-text("Approve")'); await sleep(400);
-  w = -1; for (let i = 0; i < 40; i++) { if (await A.evaluate(nm => (getCase('SLA-LIVE-1') || {}).owner === nm, cod)) { w = i * 250; break } await sleep(250) }
-  check('approved: the case is with the coordinator on both screens', w >= 0 && await B.evaluate(() => getCase('SLA-LIVE-1').tmp.st) === 'ok', w);
   check('no browser errors', !errs.length, errs);
   await b.close(); console.log(fails ? 'RESULT: FAIL (' + fails + ')' : 'RESULT: PASS'); process.exit(fails ? 1 : 0);
 })();
