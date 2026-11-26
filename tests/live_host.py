@@ -5,7 +5,8 @@ ROOT = sys.argv[1]; sys.path.insert(0, ROOT)
 import streamlit_app as app
 store = app.MemStore(); bridge = app.Bridge(store); prev, last = {}, {}
 EARLY = os.environ.get("PET_EARLY", "1") != "0"; DELAY = float(os.environ.get("DELAY", "0.05")); L = threading.Lock()
-PAGE = open(os.path.join(app.build_frontend(), "index.html"), encoding="utf-8").read()
+FE = app.build_frontend()
+PAGE = open(os.path.join(FE, "index.html"), encoding="utf-8").read()
 HOST = """<!doctype html><html><body style="margin:0"><iframe id="f" src="/app" style="border:0;width:100vw;height:100vh"></iframe><script>
 const sid='s'+Math.random().toString(36).slice(2),f=document.getElementById('f');let latest,seen,running=false,cut=false;window.RUNS=0;window.CUTS=0;
 const post=(p,b)=>fetch(p,{method:'POST',body:JSON.stringify(b)}).then(r=>r.json());
@@ -20,6 +21,11 @@ class H(BaseHTTPRequestHandler):
     def _send(self, body, ct):
         b = body.encode("utf-8"); self.send_response(200); self.send_header("Content-Type", ct); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
     def do_GET(self):
+        name = self.path.split("?")[0].lstrip("/")
+        if name.endswith((".webp", ".png", ".jpg")) and "/" not in name and os.path.exists(os.path.join(FE, name)):   # files next to the page (login picture)
+            data = open(os.path.join(FE, name), "rb").read()
+            self.send_response(200); self.send_header("Content-Type", "image/" + name.rsplit(".", 1)[1]); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+            return
         self._send(PAGE if self.path.startswith("/app") else HOST, "text/html; charset=utf-8")
     def do_POST(self):
         m = json.loads(self.rfile.read(int(self.headers["Content-Length"]))); sid, value = m["sid"], m.get("value")

@@ -187,7 +187,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   check('after a reminder is set the button becomes Acknowledge', body().includes(`openAck('${cid}','${itId}')`) && !body().includes(`openRem('${cid}','${itId}')`));
   A.run(`openAck('${cid}','${itId}')`);
   const pop2 = String(A.els['rem-pop-card'].innerHTML);
-  check('acknowledgement modal for the reminder shows the reminder text and a way to change it', pop2.includes('Confirm the switch replacement') && pop2.includes('Change reminder'));
+  check('acknowledgement modal for the reminder shows the reminder text (Nov 26: no Change reminder button)', pop2.includes('Confirm the switch replacement') && !pop2.includes('Change reminder') && !pop2.includes('popChangeRem'));
   A.run('popClose()');
 
   setv('mw-s', '2026-11-07T10:00'); setv('mw-e', '');
@@ -392,7 +392,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   check('daily report no longer has the redundant open-by-bucket bar', !/Open cases by status bucket now/.test(A.run("dailyHtml()")) && /Pending cases by age/.test(A.run("dailyHtml()")));
   check('weekly report has the AT&T case number right after the account name', JSON.stringify(A.run("WEEKLY.slice(0,3)"))===JSON.stringify(['account','attNo','arubaNo']));
   check('settings tabs stay on one line in a wider modal', /id="settings"[\s\S]{0,200}max-w-\[1680px\]/.test(html) && /id="set-tabs" class="flex flex-nowrap/.test(html));
-  check('case table has Account Name before Case Number', /<th[^>]*>Account Name<\/th><th[^>]*>Case Number<\/th>/.test(html));
+  check('case table has Account Name before Case Number (Nov 26: Priority & SLA in between)', /<th[^>]*>Account Name<\/th><th[^>]*>Priority &amp; SLA<\/th><th[^>]*>Case Number<\/th>/.test(html));
   check('case table shows no revisit reason', !/Revisit · /.test(html));
   A.run("CASES.unshift(mkCase('R-1',pool()[0].name,{caseType:'att',account:'Account A',recv:Date.now()}));CASES[0].revisit={reason:'x',tid:'T1'};render();");
   check('case table row has the account name before the case number', (()=>{const h=String(A.els['rows']?A.els['rows'].innerHTML:'');const i=h.indexOf('Account A'),j=h.indexOf('R-1');return i>=0&&j>i&&!/Revisit ·/.test(h)})());
@@ -719,6 +719,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     // -- hand-over only at the start of the receiving agent's shift, shared evenly, never bounced back
     {
       const ho = (list) => { setStaff(list); };
+      A.run('window.__hc0=HO_CHAIN;HO_CHAIN=false');   // Nov 26: the even split itself; the 3-handler rule has its own time-independent checks
       ho([ag('Gone Gary', -540, -10), ag('Early Ed', -300, 240), ag('Later Lou', -300, 240)]);
       A.run("CASES.length=0;for(let i=0;i<6;i++)CASES.push(mkCase('HO-'+i,'Gone Gary',{}))");
       A.run('eosCheck()');
@@ -748,6 +749,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
       A.run('eosCheck();eosCheck();rebalanceEos(simNow())');
       check('a manual hand-over to an agent who has not started yet stays put', J(A.run("JSON.stringify(CASES.map(c=>c.owner))")).join() === mo.join());
       check('manual hand-overs are marked so they are never taken back', A.run("CASES.every(c=>c.credit&&c.credit.man===true&&c.credit.manTo===c.owner)") === true);
+      A.run('HO_CHAIN=__hc0');
     }
     // -- automatic sign-out 20 minutes after end of shift
     const agOut = (name, passed) => ag(name, -480 - passed, -passed);
@@ -1729,6 +1731,61 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('last action = the item added before it (with when and by whom it was added)', ra.last === ra.lastX && ra.tl === 'First' && ra.ol === '', JSON.stringify(ra));
     check('next action due time = the reminder time of that last item (empty when it has none open)', ra.due === ra.dueX && ra.dueCl === '' && ra.dd === '', JSON.stringify(ra));
     check('the four columns can be added in the report builder', ['slaRun','lastAct','nextAct','nextDue'].every(k=>A.run(`!!RF('${k}')`)));
+    // Nov 25: tool links by case type, playful style, faces next to names
+    const tl = J(A.run(`JSON.stringify((()=>{const sv=[TOOLS,TOOL_LOG];TOOLS=[{id:'t1',name:'HPE Case',emo:'🛠️',color:'',url:'https://hpe.example/case/{sfdc}',types:['aruba','att']},{id:'t2',name:'Aruba Portal',emo:'📡',color:'#d4f7ea',url:'https://aruba.example/c/{arubaNo}',types:['aruba']},{id:'t3',name:'RITM',emo:'🎫',color:'',url:'https://sn.example/?n={ritm}',types:['aruba']},{id:'t4',name:'Bad',url:'notalink',types:['aruba']}];
+      const a={id:'TA-1',caseType:'aruba',sfdc:['','540 1'],arubaNo:'AR-9',ritm:''},b={id:'TB-1',caseType:'att',sfdc:'777',attNo:'X'},f={id:'TF-1',caseType:'foundation'};
+      const r={aruba:toolsFor(a).map(x=>x.name),att:toolsFor(b).map(x=>x.name),fnd:toolsFor(f).length,url:toolUrl(TOOLS[0],a).url,miss:toolUrl(TOOLS[2],a).miss,shelf:toolShelf(a),shelfF:toolShelf(f)};TOOLS=sv[0];TOOL_LOG=sv[1];return r})())`));
+    check('tool links: each case shows only the tools set up for its case type', tl.aruba.join() === 'HPE Case,Aruba Portal,RITM' && tl.att.join() === 'HPE Case' && tl.fnd === 0, JSON.stringify(tl));
+    check('... the link is filled in from the case (numbers made safe for a link)', tl.url === 'https://hpe.example/case/540%201');
+    check('... a tool whose number is still empty is greyed out ("needs …"), others open in a new tab', tl.miss.join() === 'ritm' && tl.shelf.includes('tl-tile sleep') && tl.shelf.includes('needs RITM Number') && tl.shelf.includes('target="_blank"') && tl.shelf.includes('Copy IDs'));
+    check('... no tool shelf at all on a case type with no tools (nothing changes until tools are set up)', tl.shelfF === '');
+    check('... the settings are for managers and coordinators only, and save as you type to config/tools', A.run("setTabTo0.toString().includes(\"['required','reports','prof','tools'].includes(t)&&!isLead()\")") === true && htmlSrc.includes("wq('tools',()=>dbq.doc('config/tools').set({list:TOOLS,log:TOOL_LOG,ts:Date.now()}))"));
+    check('playful style is on by default and only changes shapes and motion (colours stay from the theme)', A.run('cuteOn()') === true && htmlSrc.includes("body.cute .cc{border-radius:20px!important;border:2px solid color-mix(in srgb,var(--ac) 10%,#eef0f4)!important") && htmlSrc.includes("body.cute:not(.ssn-on){background-image:"));
+    check('... it can be switched off per screen in Settings → Theme', htmlSrc.includes('onchange="cuteSet(this.checked)"') && htmlSrc.includes("localStorage.getItem('pat_cute')!=='0'"));
+    check('playful case window and settings: styling only (checklist rows get a style hook, colours from the theme)', htmlSrc.includes("body.cute #set-tabs button.border-\\[\\#0066cc\\]{background:var(--ac)!important") && htmlSrc.includes('return `<div class="ci-row ${it.done?\'ci-done\':\'\'} flex items-start gap-2 py-2 border-b border-gray-100'));
+    // Nov 25 (22:50)
+    const mwc = J(A.run(`JSON.stringify((()=>{const n=Date.now();return{a:mwCell({mw:{s:n,e:n+36e5},mwUp:[]}),b:mwCell({mw:{s:n},mwUp:[]}),c:mwCell({}),x:xdt(n)}})())`));
+    check('cases table: maintenance window start and end shown beside Next Reminder', htmlSrc.includes('<th class="px-4 py-3 font-bold nw">Next Reminder</th><th class="px-4 py-3 font-bold nw">Maintenance Window</th>') && mwc.a.includes(mwc.x) && mwc.a.includes('End') && mwc.b.includes('not set') && mwc.c.includes('—'), JSON.stringify(mwc));
+    check('the maintenance window says to use the customer\'s local time or EST; the checklist says alarms are in Manila time', htmlSrc.includes("Enter the maintenance window in the <b>customer's local time</b> or <b>EST</b>.") && htmlSrc.includes('Checklist alarms and reminders are in <b>Manila time</b>.'));
+    A.run("window.__me2=ME;ME={role:'agent',name:'Haina Azuela'};applyMe();openSettings();setTabTo('rbuild')");
+    check('the report builder is open to everyone (agents get it as its own tab)', A.run('setTab') === 'rbuild' && String(A.els['set-body'].innerHTML).includes('Report builder') && String(A.els['set-body'].innerHTML).includes('Download Excel') && String(A.els['set-tabs'].innerHTML).includes('Report builder'));
+    {
+      const cells3 = {}; let saved3 = 0; const mk3 = k => cells3[k] || (cells3[k] = {});
+      const xl0 = A.ctx.ExcelJS, sb0 = A.ctx.saveBlob;
+      A.ctx.ExcelJS = { Workbook: function () { this.addWorksheet = () => ({ getColumn: () => ({}), getCell: (r, c) => mk3(r + ':' + c), mergeCells() {}, getRow: r => ({ getCell: c => mk3(r + ':' + c), set height(v) {} }) }); this.xlsx = { writeBuffer: async () => new Uint8Array([1]) }; } };
+      A.ctx.saveBlob = () => { saved3++ };
+      await A.run("exportXlsx('custom')");
+      check('... and an agent can download the report builder Excel too', saved3 === 1 && String(A.els['set-body'].innerHTML).includes("exportXlsx('custom')"), saved3);
+      A.ctx.ExcelJS = xl0; A.ctx.saveBlob = sb0;
+    }
+    A.run("ME=__me2;applyMe();hide('settings')");
+    check('shared alert sounds are loaded as soon as the alert settings arrive (they no longer start as the built-in tone)', htmlSrc.includes("ALERT_ICON=d.alertIcon||'⏰';sndPrefetch()}") && htmlSrc.includes("sndIdbPut(J(LSOUNDS))") && !htmlSrc.includes("try{const as=await claude.use('assets');if(as){const r=await as.upload(f);SOUNDS[k]={id:r.id,name:f.name};delete LSOUNDS[k];saveLS();saveAlerts();setTabTo('alerts');note(`Sound for “${nm}” updated for every screen`);return}}catch(e){}}"));
+    check('attendance queries use whole days (every screen asks the same question, one kept copy on the server)', htmlSrc.includes("ATT_LIVE_FROM=attDay(Date.now()-ATT_LIVE_D*864e5);") && htmlSrc.includes("where('ts','>=',attDay(Date.now()-100*864e5))"));
+    // Nov 25 (23:15): checklist items and alarms are never wiped by another screen's save
+    const mg = J(A.run(`JSON.stringify((()=>{const a={id:'a',text:'A'},b={id:'b',text:'B',rem:{at:5}},c={id:'c',text:'C'},a2={id:'a',text:'A',done:true};
+      return{both:mergeById([a],[a,b],[a,c]).map(x=>x.id).join(),alarm:!!mergeById([a],[a,b],[a,c]).find(x=>x.id==='b').rem,del:mergeById([a,b],[a,b],[a]).map(x=>x.id).join(),remoteDel:mergeById([a,b],[a],[a,b]).map(x=>x.id).join(),chg:mergeById([a],[a,b],[a2]).find(x=>x.id==='a').done===true,keepRemoteChange:mergeById([a],[a2],[a]).find(x=>x.id==='a').done===true,ids:hstr('0|x')===hstr('0|x')}})())`));
+    check('checklist merge: an item (with its alarm) added on another screen is kept when this screen adds its own', mg.both === 'a,b,c' && mg.alarm, JSON.stringify(mg));
+    check('... an item deleted here stays deleted, one deleted on another screen stays deleted', mg.del === 'a' && mg.remoteDel === 'a', JSON.stringify(mg));
+    check('... changes to an item on either screen are kept; older items get the same id on every screen', mg.chg && mg.keepRemoteChange && mg.ids, JSON.stringify(mg));
+    const sv2 = J(A.run(`JSON.stringify((()=>{const svW=wq,svDB=DBON;let sent=null;wq=(k,fn)=>{};DBON=true;const c=mkCase('MG-1','Jeff Bote',{});c.items=[{id:'a',text:'A'}];CASES.push(c);
+      REALRAW['MG-1']=fullDoc(c);APPLIED['MG-1']=pickF(c);const srv=J(fullDoc(c));srv.items.push({id:'b',text:'B',rem:{at:Date.now()+36e5}});srv.owner='Somebody Else';REALRAW['MG-1']=srv;SRVN['MG-1']=pickF(canonCase(normCase(caseFromDoc('MG-1',srv))));
+      c.items.push({id:'c',text:'C'});wq=(k,fn)=>{const d={doc:()=>({update:p=>{sent=p;return Promise.resolve()},set:p=>{sent=p;return Promise.resolve()}})};const q=dbq;dbq=d;try{fn()}finally{dbq=q}};saveNow('MG-1',c);wq=svW;DBON=svDB;
+      CASES.splice(CASES.indexOf(c),1);PEND.delete('MG-1');return{sent:sent&&Object.keys(sent),items:sent&&sent.items&&sent.items.map(x=>x.id).join(),local:c.items.map(x=>x.id).join()}})())`));
+    check('a save sends only what was changed on this screen (another screen\'s owner change is not overwritten) and merges the checklist', sv2.sent && sv2.sent.filter(k => k !== '__mb').join() === 'items' && sv2.sent.includes('__mb') && sv2.items === 'a,b,c' && sv2.local === 'a,b,c', JSON.stringify(sv2));
+    check('... the hand-over queue sender is saved with the case', htmlSrc.includes("'store','dft','csr','xreq','hoq','liftT',"));
+    // Nov 26: THD / non-THD lift
+    check('lift: the weekly report shows Yes - THD lift / Yes - Non-THD lift / Yes / No', A.run("[{lift:true,liftT:'thd'},{lift:true,liftT:'non'},{lift:true},{lift:false,liftT:'thd'}].map(c=>RF('lift').g(c)).join('|')") === 'Yes - THD lift|Yes - Non-THD lift|Yes|No' && A.run("WEEKLY.includes('lift')") === true);
+    A.run("window.__lc=mkCase('LF-1','Jeff Bote',{caseType:'aruba'});CASES.push(__lc);openId='LF-1';renderCase();cdLift('LF-1',true)");
+    check('... ticking Lift required asks THD lift or Non-THD lift (not set until chosen)', !!A.run("document.getElementById('lift-pop')") && A.run("getCase('LF-1').lift") === false);
+    A.run("liftSet('LF-1','thd')");
+    check('... choosing THD sets the lift with its type, logged in Case History', A.run("getCase('LF-1').lift") === true && A.run("getCase('LF-1').liftT") === 'thd' && A.run("getCase('LF-1').log.some(l=>/Lift required: Yes - THD lift/.test(l.details||''))") === true);
+    A.run("cdLift('LF-1',false)");
+    check('... unticking clears it', A.run("getCase('LF-1').lift") === false && A.run("getCase('LF-1').liftT") === '');
+    A.run("['LF-1'].forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)});openId=null;CASES.splice(CASES.indexOf(__lc),1)");
+    check('... the lift type is saved with the case and understood in the bulk upload ("Yes - THD")', A.run("CX.includes('liftT')") === true && htmlSrc.includes("rec.liftT=rec.lift?(/non/i.test(lt)?'non':/thd/i.test(lt)?'thd':''):''"));
+    check('everyone can download the weekly report Excel from the report builder tab', htmlSrc.includes("btn('⬇ Download weekly report (Excel)',\"exportXlsx('weekly')\""));
+    check('the case owner in the cases table shows their claimed face (initials when none)', A.run("faceOr('Nobody Here')") === '<span class="av">NH</span>' && htmlSrc.includes('<div class="sl">${faceOr(c.owner)}<span class="font-semibold">${esc(c.owner)}'));
+    check('... and the signed-in person\'s face is next to their name at the top', htmlSrc.includes('<span id="me-av" class="inline-flex shrink-0">') && htmlSrc.includes("$('me-txt').textContent=meLabel();try{meAvatar()}catch(e){}"));
   // ---------- Hand-over queue (Nov 24) ----------
   {
     const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
@@ -1737,7 +1794,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     const st = l => A.run('STAFF=' + JSON.stringify(l) + ';ensureMgrs(STAFF);STAFFLOADED=true');
     const L = n => A.run(`CASES.filter(c=>!c.closed&&c.owner===${JSON.stringify(n)}).length`);
     const ago = (n, min) => A.run(`CASES.forEach(c=>{(c.ownh||[]).forEach((x,i,a)=>{if(i&&a[i-1].n===HOQ&&x.n===${JSON.stringify(n)})x.at-=${min}*6e4})})`);
-    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();window.__ao=ATT_OFF;ATT_OFF=true;window.__stf=STAFF;window.__cs=CASES.slice();window.__me=ME");   // log-ins are not part of these checks; the schedule and cases are put back after
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();window.__ao=ATT_OFF;ATT_OFF=true;window.__stf=STAFF;window.__cs=CASES.slice();window.__me=ME;window.__hc=HO_CHAIN;HO_CHAIN=false");   // (Nov 26: the 3-handler rule is checked in its own block below) log-ins are not part of these checks; the schedule and cases are put back after
     st([ag('Hq Gail', -540, -5), ag('Hq Amy', -100, 300), ag('Hq Ben', -100, 300)]);
     A.run("CASES.length=0;for(let i=0;i<12;i++)CASES.push(mkCase('HQ-'+String(i).padStart(2,'0'),'Hq Gail',{}))");
     A.run('eosCheck()');
@@ -1805,9 +1862,114 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('the agent who sent a case to the queue does not get it back in that same shift', L('Hand-over Queue') === 1 && A.run("hoqBlocked(getCase('HB-1'),pers('Hq Fay'))") === true);
     A.run("getCase('HB-1').hoq.at=Date.now()-2*864e5;eosCheck()");
     check('... but from their next shift on they can (a case open for days that every agent already had still goes out)', A.run("getCase('HB-1').owner") === 'Hq Fay', A.run("getCase('HB-1').owner"));
-    A.run("Object.keys(ST).filter(k=>/^(HQ|P|HW|HM|HB|HT|HO)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");   // these test cases are not saved
-    A.run('ATT_OFF=__ao;STAFF=__stf;CASES.length=0;__cs.forEach(c=>CASES.push(c));ME=__me;applyMe()');
+    A.run("Object.keys(ST).filter(k=>/^(HQ|P|HW|HM|HB|HT|HO|LF)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");   // these test cases are not saved
+    A.run('ATT_OFF=__ao;STAFF=__stf;CASES.length=0;__cs.forEach(c=>CASES.push(c));ME=__me;applyMe();HO_CHAIN=__hc');
   }
+  // ---------- Nov 26: checklist buttons, Priority & SLA column, 3 handlers per case ----------
+  {
+    check('the per-item delete button is gone from the checklist', !htmlSrc.includes(`<button onclick="delItem(`) && htmlSrc.includes('function delItem('));
+    check('the Acknowledge modal has no Change reminder button', !htmlSrc.includes('⏰ Change reminder</button>'));
+    check('SLA type is saved with the case (slaT), separate from SLA Met/Missed', A.run("CX.includes('slaT')&&CXD.slaT===''&&CX.includes('sla')") === true);
+    check('SLA labels: NBD / 4hr / 6hr call to repair', A.run("SLA_T.map(x=>x[1]).join('|')") === 'NBD · Next business day|4hr call to repair|6hr call to repair');
+    check('4hr and 6hr are highlighted in the list, NBD is not', A.run("slaBadge({slaT:'4H'})").includes('bg-[#7c3aed]') && A.run("slaBadge({slaT:'6H'})").includes('ring-violet-400') && !A.run("slaBadge({slaT:'4H'})+slaBadge({slaT:'6H'})").includes('amber') && A.run("slaBadge({slaT:'6H'})").includes('6hr CTR') && !A.run("slaBadge({slaT:'NBD'})").includes('ring-'));
+    A.run("ME={role:'manager',name:'Jeff Bote'};applyMe();window.__cs2=CASES.slice();openAdd()");
+    const af = String(A.els['add-card'].innerHTML);
+    check('+ Add Case has SLA tiles, not radio buttons (NBD default)', af.includes('data-sla="NBD" aria-pressed="true"') && af.includes(`onclick="addSla('4H')"`) && af.includes(`onclick="addSla('6H')"`) && !af.includes('type="radio"'));
+    A.run("document.getElementById('add-id').value='SLA-1';addSla('4H')");
+    check('... tapping a tile selects it and keeps what was typed', String(A.els['add-card'].innerHTML).includes('data-sla="4H" aria-pressed="true"') && A.run("document.getElementById('add-id').value") === 'SLA-1');
+    A.run("document.getElementById('add-sla-v').value='4H';addCase()");
+    check('... the chosen SLA is set on the new case and logged', A.run("getCase('SLA-1')&&getCase('SLA-1').slaT") === '4H' && A.run("getCase('SLA-1').log.some(l=>/SLA 4hr call to repair/.test(l.details||''))") === true);
+    A.run("hide('add-modal');openId=null;render()");
+    const rowH = String(A.els['rows'].innerHTML);
+    check('Priority & SLA column shows priority and the SLA; the status cell no longer shows the priority', /<td class="px-4 py-3"><div class="sl"><span[^>]*>(🔺 High priority|Standard)<\/span><span[^>]*>⚡ 4hr CTR/.test(rowH) && !/<td class="px-4 py-3"><div class="sl"><span[^>]*>(🔺 High priority|Standard)<\/span><span[^>]*bg-orange-100/.test(rowH));
+    A.run("slaSet('SLA-1','NBD')");
+    check('SLA can be changed in the case window (logged)', A.run("getCase('SLA-1').slaT") === 'NBD' && A.run("getCase('SLA-1').log.some(l=>l.action==='SLA updated')") === true && htmlSrc.includes(`slaTiles(c.slaT||'',"slaSet('"+c.id+"',"`));
+    check('SLA type is available in the report builder', A.run("RF('slaT').g({slaT:'6H'})") === '6hr call to repair' && A.run("WEEKLY.includes('slaT')") === false);
+    // 3 handlers: regions are stubbed so the checks do not depend on the time of day
+    const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const nowM = A.run('minOf(simNow())');
+    const ag = (name, a, b, st) => ({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: st || 'available' });
+    const L = n => A.run(`CASES.filter(c=>!c.closed&&c.owner===${JSON.stringify(n)}).length`);
+    A.run("window.__ao2=ATT_OFF;ATT_OFF=true;window.__stf2=STAFF;window.__rg=rgOf;window.__cod=COD;HO_CHAIN=true;rgOf=n=>({'Ch Apj':'APJ','Ch Apj2':'APJ','Ch Emea':'EMEA','Ch Emea2':'EMEA','Ch Ams':'AMS','Ch Cod':'APJ'})[n]||''");
+    const st = l => A.run('STAFF=' + JSON.stringify(l) + ';ensureMgrs(STAFF);STAFFLOADED=true');
+    const mk = (id, hist, extra) => A.run(`(()=>{const c=mkCase(${JSON.stringify(id)},${JSON.stringify(hist[0])},{});c.owner=HOQ;c.ownh=${JSON.stringify(hist)}.concat(['Hand-over Queue']).map((n,i)=>({n,at:Date.now()-(9-i)*36e5}));c.credits=[];c.hoq={from:${JSON.stringify(hist[hist.length - 1])},at:Date.now()-60000};Object.assign(c,${JSON.stringify(extra || {})});CASES.push(c)})()`);
+    // APJ handler sends to the queue; EMEA agents online: the EMEA slot is free, so an EMEA agent takes it
+    st([ag('Ch Apj', -540, -5), ag('Ch Emea', -60, 400), ag('Ch Emea2', -60, 400)]);
+    A.run("CASES.length=0");mk('CH-1', ['Ch Apj']);A.run('eosCheck()');
+    check('3 handlers: APJ → the next region (EMEA) takes the case from the queue', ['Ch Emea', 'Ch Emea2'].includes(A.run("getCase('CH-1').owner")));
+    const em = A.run("getCase('CH-1').owner");
+    // the case came back to the queue: the EMEA handler gets it again, not the other EMEA agent
+    A.run(`(()=>{const c=getCase('CH-1');reassign(c,HOQ,'test');c.hoq={from:'Ch Ams',at:Date.now()-864e5}})()`);
+    st([ag('Ch Apj', -540, -5), ag('Ch Emea', -60, 400), ag('Ch Emea2', -60, 400), ag('Ch Apj2', -60, 400)]);
+    A.run(`(()=>{const c=getCase('CH-1');c.ownh=c.ownh.map(x=>x.at>Date.now()-6e5?{...x,at:x.at-3*36e5}:x).concat([{n:'Ch Ams',at:Date.now()-2*36e5},{n:HOQ,at:Date.now()-36e5}]);c.items.forEach(i=>{i.rem=null})})()`);
+    A.run("eosCheck()");
+    check('... a case only goes back to the same handler of that region (no 4th person)', A.run("getCase('CH-1').owner") === em && A.run("JSON.stringify(chainOf(getCase('CH-1')))").includes('Ch Ams'), A.run("getCase('CH-1').owner"));
+    // handler of the region not online and nothing urgent: it waits; SLA at risk (4hr CTR): another agent takes it temporarily
+    st([ag('Ch Apj', -540, -5), ag('Ch Emea', 120, 600), ag('Ch Emea2', -60, 400), ag('Ch Ams', -900, -600)]);
+    A.run("CASES.length=0");mk('CH-2', ['Ch Apj', 'Ch Emea', 'Ch Ams'], { slaT: 'NBD' });A.run("getCase('CH-2').items.forEach(i=>{i.rem=null});eosCheck()");
+    check('... handler starts later and the SLA is not at risk: the case waits for them in the queue', A.run("getCase('CH-2').owner") === 'Hand-over Queue');
+    A.run("getCase('CH-2').slaT='4H';eosCheck()");
+    check('... 4hr / 6hr CTR (or due within the hour): an available agent takes it temporarily to avoid a missed SLA', A.run("getCase('CH-2').owner") === 'Ch Emea2' && A.run("getCase('CH-2').tmp.st") === 'ok' && A.run("getCase('CH-2').tmp.for") === 'Ch Emea' && A.run("chainOf(getCase('CH-2')).EMEA") === 'Ch Emea');
+    // the handler is back online: the case returns to them through the queue
+    st([ag('Ch Emea', -60, 400), ag('Ch Emea2', -60, 400)]);
+    A.run("eosCheck()");
+    check('... once the handler is on shift the temporary owner hands it back (through the queue, logged)', A.run("getCase('CH-2').owner") === 'Ch Emea' && A.run("getCase('CH-2').log.some(l=>/Temporary ownership ended/.test(l.details||''))") === true, A.run("getCase('CH-2').owner"));
+    // handler on leave: the coordinator on duty is asked to approve temporary ownership
+    const lv = ag('Ch Emea', -60, 400); lv.msch = {}; 
+    st([ag('Ch Apj', -540, -5), Object.assign(ag('Ch Emea', -60, 400), { status: 'available' }), ag('Ch Emea2', -60, 400), ag('Ch Cod', -60, 400, 'unavailable')]);
+    A.run("pers('Ch Emea').msch={[dkey(wall(simNow()))]:'PTO',[dkey(dayBefore(wall(simNow())))]:'OFF'};COD={cur:{n:'Ch Cod',from:Date.now()-36e5},hist:[]}");
+    A.run("CASES.length=0");mk('CH-3', ['Ch Apj', 'Ch Emea']);A.run("getCase('CH-3').items.forEach(i=>{i.rem=null});eosCheck()");
+    check('... handler on leave: the case waits and the coordinator on duty is asked to approve temporary ownership (logged)', A.run("getCase('CH-3').owner") === 'Hand-over Queue' && A.run("getCase('CH-3').tmp.st") === 'ask' && A.run("getCase('CH-3').tmp.to") === 'Ch Cod' && A.run("getCase('CH-3').log.some(l=>l.action==='Temporary ownership requested')") === true, A.run("JSON.stringify(getCase('CH-3').tmp)"));
+    A.run("eosCheck()");
+    check('... it is asked once and the case is not given to another agent meanwhile', A.run("getCase('CH-3').owner") === 'Hand-over Queue' && A.run("getCase('CH-3').log.filter(l=>l.action==='Temporary ownership requested').length") === 1);
+    A.run("NOTICE_OPEN=false;remOpen=false;TMP_OPEN='';ME={role:'agent',name:'Ch Cod',coord:true};tmpAskCheck()");
+    { const xp = String(A.els['xreq-pop'].innerHTML); check('... the coordinator gets it in the same corner notification as transfer approvals (not a pop-up)', xp.includes('Temporary ownership') && xp.includes(`tmpAnswer(1,'CH-3')`) && A.run("NOTICE_OPEN") === false); }
+    A.run("tmpAnswer(1,'CH-3')");
+    check('... approved: the case moves to the coordinator as temporary owner (not a handler)', A.run("getCase('CH-3').owner") === 'Ch Cod' && A.run("getCase('CH-3').tmp.st") === 'ok' && !A.run("JSON.stringify(chainOf(getCase('CH-3')))").includes('Ch Cod'));
+    A.run("CASES.length=0");mk('CH-4', ['Ch Apj', 'Ch Emea']);A.run("getCase('CH-4').items.forEach(i=>{i.rem=null});eosCheck();tmpAnswer(0,'CH-4');eosCheck()");
+    check('... declined: the next available agent of that region takes it temporarily', A.run("getCase('CH-4').owner") === 'Ch Emea2' && A.run("getCase('CH-4').log.some(l=>l.action==='Temporary ownership declined')") === true, A.run("getCase('CH-4').owner"));
+    A.run("COD={cur:null,hist:[]};CASES.length=0");mk('CH-5', ['Ch Apj', 'Ch Emea']);A.run("getCase('CH-5').items.forEach(i=>{i.rem=null});eosCheck()");
+    check('... no coordinator on duty: the next available agent of that region takes it temporarily', A.run("getCase('CH-5').owner") === 'Ch Emea2' && A.run("getCase('CH-5').tmp.st") === 'ok');
+    // several requests: Approve all
+    A.run("COD={cur:{n:'Ch Cod',from:Date.now()-36e5},hist:[]};CASES.length=0");mk('CH-6', ['Ch Apj', 'Ch Emea']);mk('CH-7', ['Ch Apj', 'Ch Emea']);
+    A.run("CASES.forEach(c=>c.items.forEach(i=>{i.rem=null}));eosCheck();window.__xc=mkCase('XR-1','Ch Emea2',{});window.__xd=mkCase('XR-2','Ch Emea2',{});CASES.push(__xc,__xd);[__xc,__xd].forEach(c=>{c.xreq={to:'Ch Apj',by:'Jeff Bote',at:Date.now(),from:'Ch Emea2',cod:'Ch Cod'}});window.__su=SIM_USER;SIM_USER='Ch Cod';xreqRender()");
+    { const xp = String(A.els['xreq-pop'].innerHTML); check('more than one request waiting: the notification has Approve all', xp.includes('xreqApproveAll()') && xp.includes('Approve all (4)'), xp.slice(0, 300)); }
+    A.run("pers('Ch Apj').msch={};xreqApproveAll()");
+    check('... Approve all approves every transfer and temporary-ownership request', A.run("['CH-6','CH-7'].every(id=>getCase(id).owner==='Ch Cod')&&['XR-1','XR-2'].every(id=>!getCase(id).xreq&&getCase(id).log.some(l=>l.action==='Transfer approved'))") === true, A.run("JSON.stringify(CASES.map(c=>[c.id,c.owner,!!c.xreq]))"));
+    A.run("SIM_USER=__su;Object.keys(ST).filter(k=>/^XR-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
+    check('... single Approve / Reject per request still there', htmlSrc.includes(`<button onclick="xreqApprove('\${c.id}')"`) && htmlSrc.includes(`<button onclick="xreqReject('\${c.id}')"`));
+    check('SLA tiles in the case window too (no dropdown)', A.run("slaTiles('6H',\"slaSet('Z',\",'',true)").includes(`onclick="slaSet('Z','4H')"`) && !htmlSrc.includes(`<select onchange="slaSet(`));
+    check('... the 5-per-agent-per-hour pacing stays the same', A.run("HO_BATCH") === 5 && htmlSrc.includes("got[p.name]<HO_BATCH&&!hoqBlocked(c,p,+now)"));
+    check('... the rule can be switched off in Settings (Shift Schedule)', A.run("hoqSetHtml(false)").includes('id="hoq-chain"') && htmlSrc.includes("chain:HO_CHAIN"));
+    // Nov 26 (08:50): case status beside severity, smaller text, readable profile pill, playful alarm pop-ups
+    check('case status is a stacked field beside Severity (no push to its own line)', htmlSrc.includes(`<div class="cap mb-0.5 flex items-center gap-1.5 nw">Case status`) && !htmlSrc.includes(`<label class="flex items-center gap-2 sm:ml-auto"><span class="cap">Case status</span>`));
+    check('app text a little smaller (13px base; theme text size still applies)', htmlSrc.includes('html{font-size:13px}') && htmlSrc.includes("'html{font-size:'+(13*sz/100)+'px}'"));
+    check('profile pill keeps white text on its own dark backdrop on every theme', htmlSrc.includes('header #me-btn#me-btn{color:#fff!important;background-color:rgba(10,28,46,.62)!important'));
+    { const ac = A.run("alertCard({tone:'amber',title:'T',rows:[['a','b']],secs:[['s','v']],actions:'<button>OK</button>'})"); check('alarm pop-ups get the playful parts (sticker line, confetti, bouncing icon) and keep their content', ac.includes('class="ac"') && ac.includes('ac-deco') && ac.includes('Ding ding!') && ac.includes('ac-ico') && ac.includes('<button>OK</button>') && ac.includes('popClose()')); }
+    check('... playful parts are hidden when the playful style is off', htmlSrc.includes('.ac-deco,.ac-tag{display:none}') && htmlSrc.includes('body.cute .ac-deco{display:block'));
+    // Nov 26 (09:15): several revisits per case; logout and gear readable on every theme
+    A.run("window.__rvc=mkCase('RV-1','Ch Emea',{});CASES.push(__rvc);openCaseModal('RV-1');rvSet('RV-1','needed',true);rvSet('RV-1','cause','Customer');rvSet('RV-1','tid','T-1');rvSet('RV-1','doc','No access');rvSave('RV-1')");
+    check('first revisit saves as before (c.revisit)', A.run("getCase('RV-1').revisit&&getCase('RV-1').revisit.tid") === 'T-1');
+    check('... the revisit section offers ＋ Add another revisit', String(A.els['case-body'].innerHTML).includes(`rvAddStart('RV-1')`));
+    A.run("rvAddStart('RV-1');rvSet('RV-1','cause','DOA');rvSet('RV-1','tid','T-2');rvSet('RV-1','doc','Part dead');rvSave('RV-1')");
+    A.run("rvAddStart('RV-1');rvSet('RV-1','cause','Other');rvSet('RV-1','causeOther','Storm');rvSet('RV-1','tid','T-3');rvSet('RV-1','doc','Road closed');rvSave('RV-1')");
+    check('... more revisits can be added, each with its own reason, Task ID and documentation (logged)', A.run("JSON.stringify(rvAll(getCase('RV-1')).map(x=>x.tid))") === '["T-1","T-2","T-3"]' && A.run("getCase('RV-1').log.filter(l=>l.action==='Revisit added').length") === 2 && A.run("CX.includes('rvMore')") === true);
+    { const cb = String(A.els['case-body'].innerHTML); check('... all revisits are listed (#1, #2, #3) with Edit / Remove', cb.includes('Revisit needed · #1') && cb.includes('Revisit #2') && cb.includes('Revisit #3') && cb.includes(`rvEditX('RV-1','`) && cb.includes(`rvDel('RV-1','`)); }
+    A.run("(()=>{const id=getCase('RV-1').rvMore[0].id;rvEditX('RV-1',id);rvSet('RV-1','tid','T-2b');rvSave('RV-1')})()");
+    check('... an added revisit can be edited', A.run("getCase('RV-1').rvMore[0].tid") === 'T-2b' && A.run("getCase('RV-1').revisit.tid") === 'T-1');
+    check('... the report builder shows every revisit', A.run("RF('rvTid').g(getCase('RV-1'))") === 'T-1; T-2b; T-3' && A.run("RF('rvReason').g(getCase('RV-1'))").includes('Customer; DOA'));
+    A.run("openId=null;render()");
+    check('... the case list shows ↻ Revisit ×3', String(A.els['rows'].innerHTML).includes('↻ Revisit ×3'));
+    A.run("openCaseModal('RV-1');rvClear('RV-1')");
+    check('... removing revisit #1 keeps the others (the next becomes #1)', A.run("getCase('RV-1').revisit.tid") === 'T-2b' && A.run("getCase('RV-1').rvMore.length") === 1);
+    A.run("(()=>{const id=getCase('RV-1').rvMore[0].id;rvDel('RV-1',id)})();rvClear('RV-1')");
+    check('... removing the last one clears the tag as before', A.run("getCase('RV-1').revisit") === null && A.run("rvMoreOf(getCase('RV-1')).length") === 0);
+    A.run("hide('case-modal');openId=null;Object.keys(ST).filter(k=>/^RV-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
+    check('logout and gear buttons keep white on their own dark backdrop on every theme', htmlSrc.includes('header #logout-btn#logout-btn,header #set-btn#set-btn{color:#fff!important;background-color:rgba(10,28,46,.62)!important') && htmlSrc.includes('<button id="set-btn" onclick="openSettings()"'));
+    A.run("COD={cur:null,hist:[]};xreqRender();hide('mention-modal');NOTICE_OPEN=false;TMP_OPEN='';Object.keys(ST).filter(k=>/^(CH|SLA)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
+    A.run("rgOf=__rg;COD=__cod;HO_CHAIN=true;ATT_OFF=__ao2;STAFF=__stf2;CASES.length=0;__cs2.forEach(c=>CASES.push(c));ME={role:'manager',name:'Jeff Bote'};applyMe()");
+  }
+
     check('54 min late on a 9-hour shift counts 90%', A.run('attCr(54,540)') === 0.9 && A.run('attCr(600,540)') === 0 && A.run('attCr(0,540)') === 1);
     check('log-in times are shown in 24-hour format like the schedule', /^\d{2}:\d{2}$/.test(A.run("attTime(fromLI(ymd(wall(Date.now()))+'T21:07'),ymd(wall(Date.now())))")) && A.run("attTime(fromLI(ymd(wall(Date.now()))+'T21:07'),ymd(wall(Date.now())))") === '21:07' && A.run("attTime(0)") === '—');
     check('the attendance list and its Excel sheet use the 24-hour time', htmlSrc.includes("${td(attTime(x.in,x.k)+(x.st==='Late'?") && htmlSrc.includes("x.in?attTime(x.in,x.k)+(x.st==='Late'?' LATE':''):''"));

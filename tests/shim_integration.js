@@ -107,7 +107,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const css1 = String(A.els['theme-css'].textContent);
   A.run("TD={p:'image',imgUrl:'data:image/jpeg;base64,AAAA',pal:derive('#0b6fa4')};THEME_PREVIEW=J(TD);applyTheme()");
   const css2 = String(A.els['theme-css'].textContent);
-  const themeOk = css1.includes('Georgia') && css1.includes('font-size:16.1px') && css2.includes('url("data:image/jpeg;base64,AAAA")') && css2.includes('backdrop-filter');
+  const themeOk = css1.includes('Georgia') && css1.includes('font-size:14.95px') && css2.includes('url("data:image/jpeg;base64,AAAA")') && css2.includes('backdrop-filter');
   console.log('theme colours / font / image skin applied:', themeOk);
   const ok = oldQuiet && rang && stopped && owner && snoozed && again && schedOk && tplOk && themeOk && (lastDump.cases || []).includes('PET-TEST-1') && B.run('CASES.some(c=>c.id==="PET-TEST-1")') && aSees === false && String(bAudio).startsWith('data:audio/mpeg');
   console.log(ok ? 'RESULT: PASS' : 'RESULT: FAIL'); py.kill(); process.exit(ok ? 0 : 1);

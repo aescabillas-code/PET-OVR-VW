@@ -61,3 +61,30 @@ class Frame(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_answers_carry_the_page_fingerprint():
+    """Nov 24: answers say which page version the server hands out, so an older open page reloads quietly when idle."""
+    import streamlit_app as app
+    d, build = app.frontend_info()
+    assert len(build) == 12
+    page = open(d + "/index.html", encoding="utf-8").read()
+    assert "window.__PET_BUILD=" + '"' + build + '"' in page
+    b = app.Bridge(app.MemStore()); b.build = build
+    assert b.reply(None)["build"] == build
+
+
+def test_checklist_is_merged_on_the_server():
+    """Nov 25: two screens saving the same case's checklist at the same moment keep each other's items and alarms."""
+    import streamlit_app as app
+    st = app.MemStore()
+    st.put("cases", "C1", {"items": [{"text": "old item"}, {"id": "a", "text": "A"}]})
+    old_id = "i" + app._hstr("0|old item")
+    base = [{"id": old_id, "text": "old item"}, {"id": "a", "text": "A"}]
+    # screen 1 adds b (with an alarm); screen 2, which has not seen b yet, adds c and ticks A
+    app.execute(st, "patch", {"c": "cases", "id": "C1", "data": {"items": base + [{"id": "b", "text": "B", "rem": {"at": 5}}], "__mb": {"items": base}}})
+    app.execute(st, "patch", {"c": "cases", "id": "C1", "data": {"items": [base[0], {"id": "a", "text": "A", "done": True}, {"id": "c", "text": "C"}], "__mb": {"items": base}}})
+    items = st.get("cases", "C1")["items"]
+    assert [x["id"] for x in items] == [old_id, "a", "b", "c"]
+    assert items[1].get("done") is True and items[2].get("rem") == {"at": 5}
+    assert "__mb" not in st.get("cases", "C1")
