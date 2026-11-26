@@ -1966,6 +1966,20 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('... removing the last one clears the tag as before', A.run("getCase('RV-1').revisit") === null && A.run("rvMoreOf(getCase('RV-1')).length") === 0);
     A.run("hide('case-modal');openId=null;Object.keys(ST).filter(k=>/^RV-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
     check('logout and gear buttons keep white on their own dark backdrop on every theme', htmlSrc.includes('header #logout-btn#logout-btn,header #set-btn#set-btn{color:#fff!important;background-color:rgba(10,28,46,.62)!important') && htmlSrc.includes('<button id="set-btn" onclick="openSettings()"'));
+    // Nov 26 (11:45): agents shown as Absent get no cases until available
+    {
+      st([ag('Ab Agent', -60, 400), ag('Ok Agent', -60, 400), ag('Sch Absent', -60, 400)]);
+      A.run("window.__ian=isAbsentNow;isAbsentNow=(p)=>p&&p.name==='Ab Agent';pers('Sch Absent').msch={[dkey(wall(simNow()))]:'Absent'};ATT_OFF=false");
+      check('Absent agent (on shift, not logged in) is left out of round robin / hand-over pool', A.run("pool().map(p=>p.name).join(',')").includes('Ok Agent') && !A.run("pool().map(p=>p.name).join(',')").includes('Ab Agent') && A.run("coverFor(simNow(),null,null,true)") === 'Ok Agent');
+      A.run("CASES.length=0;window.__ab=mkCase('AB-1','Ok Agent',{});CASES.push(__ab);reassign(__ab,'Ab Agent','test','Jeff Bote')");
+      check('... a transfer by hand to an Absent agent is refused (message says Absent)', A.run("getCase('AB-1').owner") === 'Ok Agent' && A.run("offMsg('Ab Agent')").includes('marked Absent'));
+      A.run("reassign(__ab,'Sch Absent','test','Jeff Bote')");
+      check('... also an agent marked Absent on the schedule', A.run("getCase('AB-1').owner") === 'Ok Agent' && A.run("offName('Sch Absent')") === true);
+      A.run("isAbsentNow=()=>false;pers('Sch Absent').msch={};reassign(__ab,'Ab Agent','test','Jeff Bote')");
+      check('... once available (logged in) they can get cases again', A.run("getCase('AB-1').owner") === 'Ab Agent' && A.run("offName('Ok Agent')") === false);
+      check('... bulk transfer list marks them (absent) and disables them', htmlSrc.includes("${dayOff(p)||absentNow(p)?'disabled':''}") && htmlSrc.includes("' (absent)'"));
+      A.run("isAbsentNow=__ian;ATT_OFF=true;CASES.length=0;Object.keys(ST).filter(k=>/^AB-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
+    }
     A.run("COD={cur:null,hist:[]};xreqRender();hide('mention-modal');NOTICE_OPEN=false;TMP_OPEN='';Object.keys(ST).filter(k=>/^(CH|SLA)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
     A.run("rgOf=__rg;COD=__cod;HO_CHAIN=true;ATT_OFF=__ao2;STAFF=__stf2;CASES.length=0;__cs2.forEach(c=>CASES.push(c));ME={role:'manager',name:'Jeff Bote'};applyMe()");
   }
