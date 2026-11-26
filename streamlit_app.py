@@ -51,6 +51,7 @@ MAX_ASSET_CHARS = 14_000_000            # ~10 MB file as a base64 data URL (a Mo
 # Connection resilience: a dropped or briefly unreachable MongoDB connection is retried quietly instead of failing.
 RETRY_BUDGET = 6.0                      # seconds one database call keeps retrying a dropped connection before reporting it
 PROBE_GAP = 2.0                         # while MongoDB is unreachable, at most one reconnect attempt per this many seconds
+WARM_EVERY = 60.0                       # seconds between background checks that keep the first-answer data read and packed (only changed collections are re-read)
 KEEPALIVE_EVERY = 25.0                  # seconds between the background pings that keep the connection warm and detect outages
 TRANSIENT_NAMES = {"AutoReconnect", "NetworkTimeout", "ConnectionFailure", "ServerSelectionTimeoutError", "NotPrimaryError",
                    "NotMasterError", "WaitQueueTimeoutError", "ExecutionTimeout", "WTimeoutError", "ConnectionResetError",
@@ -888,6 +889,30 @@ class Bridge:
         self.lock = threading.Lock()
         self._sizes: Dict[Tuple[str, int], int] = {}     # (collection, version) -> JSON size of the whole collection
         self._bootz: Optional[Tuple[Any, str]] = None    # (snapshot, its compressed text): packed once per snapshot
+        self._warm_t: Optional[threading.Thread] = None
+
+    # Faster opening (Nov 26): the data a page gets with its first answer is read and packed in the background — once
+    # when the server starts and again after changes (checked every WARM_EVERY seconds) — so a page that opens does not
+    # wait for the database reads and the packing. Only the same cached snapshot and packed text are kept (no extra memory).
+    def warm(self) -> None:
+        try:
+            if getattr(self.store, "kind", "") == "mongodb" and getattr(self.store, "down_since", None) is not None:
+                return                                  # reconnecting: nothing to read now
+            self.pack_boot(self.store.snapshot())
+        except Exception:  # noqa: BLE001  the page then reads the data itself, as before
+            pass
+
+    def start_warm(self, every: float = 0.0) -> None:
+        every = every or WARM_EVERY
+        if self._warm_t is not None:
+            return
+
+        def loop() -> None:
+            while True:
+                self.warm()
+                time.sleep(every)
+        self._warm_t = threading.Thread(target=loop, name="pet-boot-warm", daemon=True)
+        self._warm_t.start()
 
     def _size(self, c: str, one: Dict[str, Any]) -> int:
         key = (c, int(one.get("version") or 0))
@@ -1116,7 +1141,9 @@ def main() -> None:
     @st.cache_resource(show_spinner=False)             # no spinner above the app: it would move the app and reload it (white screen)
     def boot():
         store, err = make_store()
-        return store, Bridge(store), err
+        br = Bridge(store)
+        br.start_warm()                                 # faster opening: the first page's data is ready before it asks
+        return store, br, err
 
     store, bridge, store_err = boot()
     try:

@@ -1052,7 +1052,6 @@ Still in place, listed for review (each one works and is in use or kept on purpo
 
 | Item | What it is | Note |
 |---|---|---|
-| `prodCredsOf`, `regionFor`, `sSet`, `setUser` | small helpers | used only by the automated tests |
 | Old text copy reader in `web/shim.js` (`pet_boot_cache`) | reads the kept copy saved before Nov 19 | can go once every browser has opened the Nov 19 version |
 | Seasonal decorations (Christmas, New Year, Valentine's, Halloween; Santa, naughty list) | shown by date, can be turned off in Settings | feature |
 | DIY log-in picture editor | upload a picture and mark faces (Settings) | feature; not needed if only the built-in picture is used |
@@ -1382,3 +1381,47 @@ hand-over queue moving cases, this happened more often. Reproduced with two scre
   to them until they're available"), the bulk-transfer list shows them as *(absent)* and disabled, and an approved request logs
   that the case stays with its owner. As soon as they log in, they can receive cases again.
 * Tests: new checks in `tests/feature_checks.js`.
+
+## Schedule changes keep 3 handlers, one per region (Nov 26, 13:45)
+* The 3 handlers of a case are now **kept on the case** (`c.tm` = APJ / EMEA / AMS handler). Older cases start from their history
+  and store it at their next hand-over (no burst of saves).
+* A handler's region is read from the **coming week's schedule** (monthly schedule first, else the weekly pattern), so a schedule
+  change counts right away; days off and leave don't change it.
+* **Schedule change to another region** (or the handler left the team / became a manager): the handler is **replaced** —
+  their slot is emptied and logged in Case History (*Handler replaced*), they are not taken back as a handler of that case
+  (`c.tmx`), and if they own the case at that moment it goes to the **hand-over queue** (logged). The queue then gives it to an
+  available agent of the region that is now empty, and that agent becomes the region's handler for the rest of the case.
+  Result: never two agents of one region on the case, and no region left without a handler.
+* Everything else of the 3-handler rule is unchanged (waits for the handler, SLA-at-risk temporary owner, coordinator approval
+  for handlers on leave, temporary owners don't count, 5 per agent per hour, manual transfers not restricted).
+* Tests: new checks in `tests/feature_checks.js`.
+
+## Clean-up and faster opening (Nov 26, 14:10)
+* **Removed (replaced or no longer used; nothing on screen changes):**
+  * `delItem` (the per-item delete button was removed on Nov 26) and `popChangeRem` (the *Change reminder* button in the
+    Acknowledge pop-up was removed on Nov 26);
+  * `tmpLater` and its snooze list `TMP_SNZ` (left over from the temporary-ownership pop-up, now in the approval notification);
+  * `hoFill` (the old end-of-shift hand-over split, replaced by the hand-over queue on Nov 24);
+  * `sSet` (weekly-pattern editor replaced by the monthly schedule), `setUser` (old simulation switch), `prodCredsOf` and
+    `regionFor` (only the tests used them; the tests now do the same thing themselves).
+* **Faster opening:** the server now reads and packs the data a page receives with its first answer **in the background** — once
+  when the app starts and again after changes (checked every 60 s, only changed collections are read again). A page that opens
+  gets the ready packed copy straight away instead of waiting for the database reads and the packing. It keeps only the copy it
+  already kept (no extra memory) and does nothing while MongoDB is reconnecting. Already in place from earlier: the kept copy in
+  the browser shows the dashboard at once on a reload, the Excel libraries load after the page is up, the login pictures are
+  separate cached files, and fonts don't block the page.
+* Tests: `tests/test_frame.py` (background packing), `tests/feature_checks.js` updated for the removed helpers.
+
+## 3 handlers per case reverted (Nov 26, 18:40)
+* The **3 handlers per case** rule (APJ → EMEA → AMS), its **handler replacement on schedule changes** and the
+  **temporary ownership via the coordinator on duty** are removed, because the schedules don't have the same number of people in
+  each region. The sections "Priority & SLA column, SLA in + Add Case, 3 handlers per case…" (3-handler part), "Schedule changes
+  keep 3 handlers, one per region" and the temporary-ownership parts of "Approvals in one notification…" above no longer apply.
+* The hand-over queue deals exactly as before that rule: **5 per available agent every hour**, high priority, overdue and nearest
+  due first, never back to the sender in the same shift, OFF / PTO / Absent agents left out. The *Settings → Shift Schedule* switch
+  and the "Handled by" line in the case window are gone; the case fields `tm`, `tmx`, `tmp`, `tmpo` are no longer used (values
+  already saved on older cases are simply ignored).
+* Kept: SLA (Add Case tiles, Priority & SLA column, colours, report column), the checklist button removals, the transfer approval
+  notification with **Approve all** (transfer requests), multiple revisits, Absent agents getting no cases, the look changes, the
+  clean-up and the faster opening.
+* Tests updated: `tests/feature_checks.js`, `tests/live_sla_and_handlers.js`.
