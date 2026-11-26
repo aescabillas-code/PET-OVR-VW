@@ -191,8 +191,26 @@
       return unz(z).then(function (b) { r0.boot = b; }, function () {});
     }).then(function () { onRender(d); }, function () { onRender(d); });
   });
+  /* Nov 25: a page left open keeps running the code it was opened with. When the server hands out a newer version (after an
+     update), a large red message across the top of the screen asks the user to refresh. Nothing reloads by itself any more
+     (the automatic reload interrupted people), and work is never lost: unsaved changes are sent when the page is refreshed. */
+  var NEWBUILD = '';
+  function buildBanner() {
+    if (!NEWBUILD || !document.body || document.getElementById('pet-update')) return;
+    var d = document.createElement('div');
+    d.id = 'pet-update';
+    d.setAttribute('role', 'alert');
+    d.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:2147483000;background:#d40032;color:#fff;padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;font:800 17px/1.3 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.35);text-align:center;border-bottom:4px solid #8f0022';
+    d.innerHTML = '<span style="font-size:24px">⚠️</span><span>PAT has been updated. Please refresh the page now to keep everything working correctly.<span style="display:block;font:600 12.5px system-ui,sans-serif;opacity:.92;margin-top:2px">Your work is kept. If this message comes back after refreshing, press Ctrl+Shift+R (Cmd+Shift+R on a Mac).</span></span>' +
+      '<button type="button" id="pet-update-go" style="background:#fff;color:#d40032;border:0;border-radius:999px;padding:9px 18px;font:900 15px system-ui,sans-serif;cursor:pointer;box-shadow:0 3px 0 rgba(0,0,0,.25)">⟳ Refresh now</button>';
+    document.body.appendChild(d);
+    var b = document.getElementById('pet-update-go');
+    if (b) b.onclick = function () { try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {} setTimeout(function () { try { location.reload(); } catch (e) {} }, 150); };
+  }
+  setInterval(buildBanner, 3000);
   function onRender(d) {
     var r = (d.args || {}).reply || {};
+    if (r.build && window.__PET_BUILD && r.build !== window.__PET_BUILD && !NEWBUILD) { NEWBUILD = r.build; setTimeout(buildBanner, 0); }
     var first = !SYNC;
     if (typeof r.now === 'number') { var sk = r.now - Date.now(); SKEW = SKEW == null ? sk : SKEW * 0.8 + sk * 0.2; }   // the server's clock (Nov 17)
     if (r.boot && (!BOOT_OK || CACHED)) { BOOT = r.boot; BOOT_OK = true; CACHED = false; window.__petCacheOnly = false; }
