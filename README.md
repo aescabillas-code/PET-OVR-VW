@@ -1582,3 +1582,17 @@ hand-over queue moving cases, this happened more often. Reproduced with two scre
   clicked by someone who is not the owner, does not stop it. Updating the maintenance window to a future start still stops
   it as before.
 * Tests: `tests/feature_checks.js`, `tests/live_mw_reminders.js`.
+
+## Maintenance window in Eastern Time (EST) — checks, note and the "still passed after update" fix (Nov 27, 23:25)
+* Maintenance windows are now **entered, shown and checked in Eastern Time** (EST / EDT, America/New_York), whatever the app
+  timezone. The Start / End fields are labelled **EST**; the note reads "Enter the maintenance window in EST (Eastern Time).
+  It is shown and checked in Eastern Time."; the case window, cases table, pop-up, notice, Case History lines and Excel
+  downloads show the times with EST (EDT in summer).
+* **Fix:** a time typed in EST used to be read as the app's timezone (Manila), so a window updated to, e.g., 8:00 PM EST was
+  taken as 8:00 PM Manila and could still count as passed (tile, notice, pop-up). Now it is read as EST, so an updated window
+  with a later start drops off the Maintenance Window Reminder tile, the notice and the pop-up right away.
+* The tile, pop-up, 10-minute notice and the report SLA column (time left until the window starts) all use the Eastern Time
+  start.
+* Windows saved before this: their times were typed in EST, so they are read again as Eastern Time (no stored data is
+  changed until someone edits, updates or sets the end of that window; then it is saved in Eastern Time, `tz:'ET'`).
+* Tests: `tests/feature_checks.js` (EST / EDT, older windows, the update fix), `tests/live_mw_reminders.js`.
