@@ -485,7 +485,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   check('Edit shows the start and end filled with the current values', mb2.includes('data-dtp="mw-es"') && mb2.includes('data-dtp="mw-ee"') && mb2.includes('value="2026-11-07T10:00"') && mb2.includes('value="2026-11-07T12:00"'));
   setv('mw-es', '2026-11-07T11:00'); setv('mw-ee', '2026-11-07T13:30'); A.run("mwEditSave('MWE-1')");
   const w = J(A.run("JSON.stringify(getCase('MWE-1').mw)"));
-  check('saving the edit changes the start and the end', w.s === A.run("fromLI('2026-11-07T11:00')") && w.e === A.run("fromLI('2026-11-07T13:30')") && !!w.editTs);
+  check('saving the edit changes the start and the end', w.s === A.run("fromLIET('2026-11-07T11:00')") && w.e === A.run("fromLIET('2026-11-07T13:30')") && !!w.editTs);
   check('the edit is recorded in the case history and is not an update entry', A.run("getCase('MWE-1').mwUp.length") === 0 && A.run("getCase('MWE-1').log.some(l=>l.action==='Maintenance window edited')") === true);
 
   // ---------- maintenance window: update button keeps the original ----------
@@ -495,17 +495,17 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   check('Update opens a start / end form', String(A.els['case-body'].innerHTML).includes('data-dtp="mw-us"') && String(A.els['case-body'].innerHTML).includes('data-dtp="mw-ue"'));
   const orig = J(A.run("JSON.stringify(getCase('MWE-1').mw)"));
   setv('mw-us', '2026-11-08T09:00'); setv('mw-ue', '2026-11-08T11:00'); A.run("mwUpdSave('MWE-1')");
-  check('an update becomes the current window and the original is untouched', A.run("getCase('MWE-1').mwUp.length") === 1 && A.run("mwCur(getCase('MWE-1')).s") === A.run("fromLI('2026-11-08T09:00')") && A.run("getCase('MWE-1').mw.s") === orig.s && A.run("getCase('MWE-1').mw.e") === orig.e);
+  check('an update becomes the current window and the original is untouched', A.run("getCase('MWE-1').mwUp.length") === 1 && A.run("mwCur(getCase('MWE-1')).s") === A.run("fromLIET('2026-11-08T09:00')") && A.run("getCase('MWE-1').mw.s") === orig.s && A.run("getCase('MWE-1').mw.e") === orig.e);
   A.run("mwUpd('MWE-1')"); setv('mw-us', '2026-11-08T09:00'); setv('mw-ue', '2026-11-08T11:00'); A.run("mwUpdSave('MWE-1')");
   check('an update identical to the current window is not added', A.run("getCase('MWE-1').mwUp.length") === 1);
   A.run("mwUpd('MWE-1')"); setv('mw-us', '2026-11-08T12:00'); setv('mw-ue', '2026-11-08T10:00'); A.run("mwUpdSave('MWE-1')");
   check('update: end before the start is refused', A.run("getCase('MWE-1').mwUp.length") === 1);
   for (const [a, b] of [['2026-11-09T09:00', '2026-11-09T10:00'], ['2026-11-10T09:00', '']]) { A.run("mwUpd('MWE-1')"); setv('mw-us', a); setv('mw-ue', b); A.run("mwUpdSave('MWE-1')"); }
-  check('there is no limit on updates and the last one is current', A.run("getCase('MWE-1').mwUp.length") === 3 && A.run("mwCur(getCase('MWE-1')).s") === A.run("fromLI('2026-11-10T09:00')") && A.run("mwCur(getCase('MWE-1')).e") === null);
+  check('there is no limit on updates and the last one is current', A.run("getCase('MWE-1').mwUp.length") === 3 && A.run("mwCur(getCase('MWE-1')).s") === A.run("fromLIET('2026-11-10T09:00')") && A.run("mwCur(getCase('MWE-1')).e") === null);
   check('every update is recorded in the case history', A.run("getCase('MWE-1').log.filter(l=>l.action==='Maintenance window updated').length") === 3);
   const mbU2 = String(A.els['case-body'].innerHTML);
   check('the case shows Original, earlier updates and the Current one', mbU2.includes('Original') && mbU2.includes('Update 1') && mbU2.includes('Update 2') && mbU2.includes('Current'));
-  check('the weekly report shows only the current maintenance window (no Original / Update tags)', (() => { const t = String(A.run("mwX(getCase('MWE-1'))")), m = A.run("JSON.stringify(mwCur(getCase('MWE-1')))"), cur = JSON.parse(m); return !t.includes('Original') && !t.includes('Update') && !t.includes('\n') && t.startsWith(A.run("xdt(" + cur.s + ")")); })());
+  check('the weekly report shows only the current maintenance window (no Original / Update tags)', (() => { const t = String(A.run("mwX(getCase('MWE-1'))")), m = A.run("JSON.stringify(mwCur(getCase('MWE-1')))"), cur = JSON.parse(m); return !t.includes('Original') && !t.includes('Update') && !t.includes('\n') && t.startsWith(A.run("xdtET(" + cur.s + ")")); })());
   check('closing needs an end time on the current window', J(A.run("JSON.stringify(missingFields(getCase('MWE-1')))")).includes('Maintenance Window end time'));
   // restore the state the next tests expect
   A.run("getCase('MWE-1').mwUp.length=0");
@@ -525,7 +525,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   setv('mw-as', ''); setv('mw-ae', ''); A.run("mwAddSave('MWE-1')");
   check('add: the start cannot be blank', A.run("getCase('MWE-1').mwUp.length") === 0);
   for (const [a, b] of [['2026-11-12T09:00', '2026-11-12T10:00'], ['2026-11-13T09:00', '2026-11-13T10:00'], ['2026-11-14T09:00', '']]) { A.run("mwAdd('MWE-1')"); setv('mw-as', a); setv('mw-ae', b); A.run("mwAddSave('MWE-1')"); }
-  check('any number of new windows can be added and the newest is current', A.run("getCase('MWE-1').mwUp.length") === 3 && A.run("mwCur(getCase('MWE-1')).s") === A.run("fromLI('2026-11-14T09:00')") && A.run("getCase('MWE-1').mwUp.every(m=>m.add)"));
+  check('any number of new windows can be added and the newest is current', A.run("getCase('MWE-1').mwUp.length") === 3 && A.run("mwCur(getCase('MWE-1')).s") === A.run("fromLIET('2026-11-14T09:00')") && A.run("getCase('MWE-1').mwUp.every(m=>m.add)"));
   check('adding keeps the first window untouched', A.run("getCase('MWE-1').mw.s") === w.s);
   check('every added window is recorded in the history', A.run("getCase('MWE-1').log.filter(l=>l.action==='Maintenance window added').length") === 3);
   { const t = String(A.els['case-body'].innerHTML), r = String(A.run("mwX(getCase('MWE-1'))")); check('the case lists the added windows; the report shows only the current one', t.includes('Window 2') && t.includes('Window 4') && !r.includes('Window') && !r.includes('\n')); }
@@ -1723,10 +1723,10 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     const lr = J(A.run("JSON.stringify((()=>{const a=attOf('At Amy',fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now()),b=attOf('At Ben',fromLI(ymd(wall(Date.now()))+'T00:00'),Date.now());return{a:attPct(a),cr:a.cr,b:attPct(b),x:a.list[0]}})())"));
     check('a late log-in lowers attendance (only the part of the shift logged in counts); on time stays 100%', lr.a < 100 && lr.a > 0 && lr.cr < 1 && lr.b === 100 && lr.x.cr === lr.cr, JSON.stringify(lr));
     // Nov 23: report builder: running SLA from the current MW start, last / next action from the checklist
-    const rb = J(A.run(`JSON.stringify((()=>{const n=Date.now(),c={id:'rbx',items:[{text:'Call store',rem:{at:n-7e6,done:{at:n-6e6,by:'Ana',text:'ok'}}},{text:'Confirm CE',rem:{at:n-3e6,done:{at:n-2e6,by:'Ben',text:'ok'}}},{text:'Check part',rem:{at:n+36e5}},{text:'Other',done:true}],mw:{s:n+(2*1440+5*60+30)*6e4+30000,e:n+4*864e5},mwUp:[]};
-      const later={...c,mw:{s:n-(27*60+5)*6e4-30000}},closed={...c,closed:true,closedAt:n-60*6e4};
+    const rb = J(A.run(`JSON.stringify((()=>{const n=Date.now(),c={id:'rbx',items:[{text:'Call store',rem:{at:n-7e6,done:{at:n-6e6,by:'Ana',text:'ok'}}},{text:'Confirm CE',rem:{at:n-3e6,done:{at:n-2e6,by:'Ben',text:'ok'}}},{text:'Check part',rem:{at:n+36e5}},{text:'Other',done:true}],mw:{s:n+(2*1440+5*60+30)*6e4+30000,e:n+4*864e5,tz:'ET'},mwUp:[]};
+      const later={...c,mw:{s:n-(27*60+5)*6e4-30000,tz:'ET'}},closed={...c,closed:true,closedAt:n-60*6e4};
       return{run:RF('slaRun').g(c),ns:RF('slaRun').g(later),cl:RF('slaRun').g(closed),none:RF('slaRun').g({items:[]}),last:RF('lastAct').g(c),next:RF('nextAct').g(c),nextCl:RF('nextAct').g(closed),due:RF('nextDue').g(c),dueX:xdt(n+36e5),dueCl:RF('nextDue').g(closed),
-        upd:RF('slaRun').g({...c,mwUp:[{s:n+90*6e4+30000}]})}})())`));
+        upd:RF('slaRun').g({...c,mwUp:[{s:n+90*6e4+30000,tz:'ET'}]})}})())`));
     check('SLA column = time left from the moment the report is extracted until the current maintenance window starts (days and hours:minutes)', rb.run === '2d 05:30 left' && rb.ns === 'Started 1d 03:05 ago' && rb.none === 'No maintenance window data' && rb.upd === '0d 01:30 left', JSON.stringify(rb));
     check('... a closed case is counted at its closing time', rb.cl === '2d 06:30 left (at closing)', rb.cl);
     // Nov 24: the hand-over batch is set in Settings; the Account Name column can show the actual account name
@@ -1777,7 +1777,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     // Nov 25 (22:50)
     const mwc = J(A.run(`JSON.stringify((()=>{const n=Date.now();return{a:mwCell({mw:{s:n,e:n+36e5},mwUp:[]}),b:mwCell({mw:{s:n},mwUp:[]}),c:mwCell({}),x:xdt(n)}})())`));
     check('cases table: maintenance window start and end shown beside Next Reminder', htmlSrc.includes('<th class="px-4 py-3 font-bold nw">Next Reminder</th><th class="px-4 py-3 font-bold nw">Maintenance Window</th>') && mwc.a.includes(mwc.x) && mwc.a.includes('End') && mwc.b.includes('not set') && mwc.c.includes('—'), JSON.stringify(mwc));
-    check('the maintenance window says to use the customer\'s local time or EST; the checklist says alarms are in Manila time', htmlSrc.includes("Enter the maintenance window in the <b>customer's local time</b> or <b>EST</b>.") && htmlSrc.includes('Checklist alarms and reminders are in <b>Manila time</b>.'));
+    check('the maintenance window says to enter it in EST (Nov 27, 23:25); the checklist says alarms are in Manila time', htmlSrc.includes("Enter the maintenance window in <b>EST</b> (Eastern Time). It is shown and checked in Eastern Time.") && htmlSrc.includes('Checklist alarms and reminders are in <b>Manila time</b>.'));
     A.run("window.__me2=ME;ME={role:'agent',name:'Haina Azuela'};applyMe();openSettings();setTabTo('rbuild')");
     check('the report builder is open to everyone (agents get it as its own tab)', A.run('setTab') === 'rbuild' && String(A.els['set-body'].innerHTML).includes('Report builder') && String(A.els['set-body'].innerHTML).includes('Download Excel') && String(A.els['set-tabs'].innerHTML).includes('Report builder'));
     {
@@ -2320,9 +2320,9 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     const nowM = A.run('minOf(simNow())');
     const ag = (name, a, b) => ({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: 'available' });
     A.run('window.__mwStf=STAFF;window.__mwMe=ME;window.__mwSu=SIM_USER;STAFF=' + JSON.stringify([ag('Mw Amy', -60, 400), ag('Mw Ben', -60, 400)]) + ';ensureMgrs(STAFF);STAFFLOADED=true');
-    A.run(`(()=>{CASES.length=0;const M=60000,n=Date.now(),mk=(id,o,s,x)=>{const c=mkCase(id,o,{account:'Acc '+id});if(s!=null)c.mw={s:n+s,e:null,by:'System',ts:n-36e5};Object.assign(c,x||{});CASES.push(c);return c};
+    A.run(`(()=>{CASES.length=0;const M=60000,n=Date.now(),mk=(id,o,s,x)=>{const c=mkCase(id,o,{account:'Acc '+id});if(s!=null)c.mw={s:n+s,e:null,tz:'ET',by:'System',ts:n-36e5};Object.assign(c,x||{});CASES.push(c);return c};
       mk('MW-1','Mw Amy',null);mk('MW-2','Mw Amy',-60*M);mk('MW-3','Mw Amy',8*M);mk('MW-4','Mw Amy',30*M);mk('MW-5','Mw Amy',-90*M,{closed:true,closedAt:n});mk('MW-6','Mw Amy',-90*M,{csr:true});
-      const u=mk('MW-7','Mw Ben',-3*864e5);u.mwUp=[{s:n+2*36e5,e:null,by:'Mw Ben',ts:n}];
+      const u=mk('MW-7','Mw Ben',-3*864e5);u.mwUp=[{s:n+2*36e5,e:null,tz:'ET',by:'Mw Ben',ts:n}];
       ME={role:'agent',name:'Mw Amy'};SIM_USER='Mw Amy';applyMe();TAB='active';DUEF=false;MWF=false;RID++;render()})()`);
     const stats = String(A.els['stats'].innerHTML);
     check('Maintenance Window Reminder tile sits right after Active Cases (before Due Reminders)', stats.indexOf('Active Cases') < stats.indexOf('Maintenance Window Reminder') && stats.indexOf('Maintenance Window Reminder') < stats.indexOf('Due Reminders') && stats.includes('mwTile()'));
@@ -2354,7 +2354,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     // Nov 27 (20:30): the maintenance window pop-up comes back every time the case is opened until the window is updated
     A.run("ME={role:'agent',name:'Mw Amy'};SIM_USER='Mw Amy';applyMe()");
     check('the maintenance window pop-up shows every time the case is opened until the window is updated', [1, 2, 3].every(() => A.run("mwqClose();hide('case-modal');openId=null;openCaseModal('MW-2');!$('mwq-pop').classList.contains('hidden')") === true));
-    A.run("(()=>{const c=getCase('MW-2');c.mwUp=[{s:Date.now()+36e5,e:null,by:'Mw Amy',ts:Date.now()}];mwqClose();hide('case-modal');openId=null;openCaseModal('MW-2')})()");
+    A.run("(()=>{const c=getCase('MW-2');c.mwUp=[{s:Date.now()+36e5,e:null,tz:'ET',by:'Mw Amy',ts:Date.now()}];mwqClose();hide('case-modal');openId=null;openCaseModal('MW-2')})()");
     check('... and stops once the maintenance window has a new future start', A.run("$('mwq-pop').classList.contains('hidden')") === true && A.run("mwPast(getCase('MW-2'))") === false);
     A.run("hide('case-modal');openId=null");
     // Nov 27 (21:35): "Later" by the owner hides the pop-up until the case is handed over; the next owner sees it until they click Later
@@ -2375,6 +2375,25 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     hand('MW-1', 'Mw Amy');
     check('... and comes back after the next hand-over (even back to an earlier owner)', opn('Mw Amy', 'MW-1') === true);
     A.run("mwqClose();hide('case-modal');openId=null;ME={role:'agent',name:'Mw Amy'};SIM_USER='Mw Amy';applyMe()");
+    // Nov 27 (23:25): maintenance windows are entered, shown and checked in Eastern Time (EST / EDT)
+    check('a window typed as 2026-11-28 01:00 is 01:00 EST (06:00 UTC), whatever the app timezone', A.run("fromLIET('2026-11-28T01:00')") === Date.UTC(2026, 10, 28, 6, 0) && A.run("toLIET(Date.UTC(2026,10,28,6,0))") === '2026-11-28T01:00' && A.run("etAbbr(Date.UTC(2026,10,28,6,0))") === 'EST');
+    check('... summer time is handled (EDT, UTC-4)', A.run("fromLIET('2026-07-01T10:00')") === Date.UTC(2026, 6, 1, 14, 0) && A.run("etAbbr(Date.UTC(2026,6,1,14,0))") === 'EDT');
+    check('... a window saved before this (typed in EST, read as the app timezone) is read again as Eastern Time', A.run("mwS({s:fromLI('2026-11-28T01:00')})") === Date.UTC(2026, 10, 28, 6, 0) && A.run("mwS({s:Date.UTC(2026,10,28,6,0),tz:'ET'})") === Date.UTC(2026, 10, 28, 6, 0) && A.run("toLIET(mwS({s:fromLI('2026-11-28T01:00')}))") === '2026-11-28T01:00');
+    check('... and shown with EST', /EST/.test(A.run("mwTxt({s:Date.UTC(2026,10,28,6,0),e:Date.UTC(2026,10,28,8,0),tz:'ET'})")) && A.run("xdtET(Date.UTC(2026,10,28,6,0))") === '2026-11-28 01:00 EST');
+    {
+      // the reported problem: a window that passed, updated to a later EST time, kept showing as passed
+      A.run("ME={role:'agent',name:'Mw Amy'};SIM_USER='Mw Amy';applyMe();(()=>{const c=mkCase('ET-1','Mw Amy',{account:'Acc ET'});c.mw={s:Date.now()-2*36e5,e:null,tz:'ET',by:'Mw Amy',ts:Date.now()-5*36e5};CASES.push(c);RID++})()");
+      check('a passed window is on the tile', A.run("mwPastList().some(c=>c.id==='ET-1')") === true);
+      const etv = A.run("toLIET(Date.now()+3*36e5)");
+      A.run("openCaseModal('ET-1',true);mwUpd('ET-1')"); setv('mw-us', etv); setv('mw-ue', ''); A.run("mwUpdSave('ET-1');RID++");
+      check('... updated to a later time typed in EST: no longer passed — off the tile, no notice, no pop-up', A.run("mwPastList().some(c=>c.id==='ET-1')") === false && Math.abs(A.run("mwStart(getCase('ET-1'))-(Date.now()+3*36e5)")) < 61000 && A.run("mwCur(getCase('ET-1')).tz") === 'ET' && !A.run("mwnList().some(c=>c.id==='ET-1')") && A.run("hide('case-modal');openId=null;openCaseModal('ET-1');$('mwq-pop').classList.contains('hidden')") === true, etv);
+      // an older window (no tz): the edit form shows the time as it was typed; saving the end converts it to Eastern Time
+      A.run("hide('case-modal');openId=null;(()=>{const c=mkCase('ET-2','Mw Amy',{});c.mw={s:fromLI('2026-12-01T09:00'),e:null,by:'Mw Amy',ts:Date.now()};CASES.push(c);RID++})();openCaseModal('ET-2',true);mwEdit('ET-2')");
+      check('an older window shows in the edit form as it was typed (EST)', String(A.els['case-body'].innerHTML).includes('value="2026-12-01T09:00"') && /Start <span[^>]*>EST<\/span>/.test(String(A.els['case-body'].innerHTML)));
+      A.run("mwEditCancel('ET-2')"); setv('mw-end', '2026-12-01T11:00'); A.run("mwEnd('ET-2')");
+      check('... setting its end keeps the start and saves both in Eastern Time', A.run("JSON.stringify([getCase('ET-2').mw.s,getCase('ET-2').mw.e,getCase('ET-2').mw.tz])") === JSON.stringify([Date.UTC(2026, 11, 1, 14, 0), Date.UTC(2026, 11, 1, 16, 0), 'ET']));
+      A.run("mwqClose();hide('case-modal');openId=null;['ET-1','ET-2'].forEach(id=>{const i=CASES.findIndex(c=>c.id===id);if(i>=0)CASES.splice(i,1)});RID++");
+    }
     // Nov 27 (20:30): a reminder is due / missed only when its actual ETA passes (not during the 5-minute warning)
     A.run("(()=>{const c=mkCase('DU-1','Mw Amy',{});c.items.push({id:'d1',text:'Within warning',done:false,rem:{at:Date.now()+3*60000,text:'Within warning',by:'Mw Amy',setAt:Date.now()-36e5}},{id:'d2',text:'Past ETA',done:false,rem:{at:Date.now()-60000,text:'Past ETA',by:'Mw Amy',setAt:Date.now()-36e5}});CASES.push(c);TAB='active';DUEF=false;MWF=false;RID++;render()})()");
     check('5 minutes before the ETA a reminder is not counted as due (tile / due list) — only once the ETA has passed', A.run("dueList(getCase('DU-1')).map(x=>x.it?x.it.id:(x.i||x.id||x.r.text)).length") === 1 && A.run("dueList(getCase('DU-1'))[0].r.text") === 'Past ETA' && A.run("pending(getCase('DU-1')).some(x=>x.r.text==='Within warning')") === true && A.run("ALERT_LEAD") > 0, A.run("JSON.stringify({d:dueList(getCase('DU-1')).map(x=>x.r.text),p:pending(getCase('DU-1')).map(x=>x.r.text),L:ALERT_LEAD})"));

@@ -12,7 +12,7 @@ const { chromium } = require('playwright'); const sleep = ms => new Promise(r =>
   const agent = await A.evaluate(() => { const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0') }, nm = minOf(simNow()), on = name => ({ name, role: 'Support', start: T(nm - 60), end: T(nm + 400), days: [1, 1, 1, 1, 1, 1, 1], status: 'available' });
     STAFF = [on('Mwl Agent'), on('Mwl Other')]; ensureMgrs(STAFF); STAFFLOADED = true; saveStaff(true, true); const a = 'Mwl Agent';
     ME = { role: 'agent', name: a }; SIM_USER = a; applyMe(); saveMe(); lpHide(); try { hideWelcome() } catch (e) {}
-    const M = 60000, n = Date.now(), mk = (id, s, x) => { const c = mkCase(id, a, { account: 'Store ' + id }); if (s != null) c.mw = { s: n + s, e: null, by: 'System', ts: n - 36e5 }; Object.assign(c, x || {}); CASES.unshift(c); queueSave(c); return c };
+    const M = 60000, n = Date.now(), mk = (id, s, x) => { const c = mkCase(id, a, { account: 'Store ' + id }); if (s != null) c.mw = { s: n + s, e: null, tz: 'ET', by: 'System', ts: n - 36e5 }; Object.assign(c, x || {}); CASES.unshift(c); queueSave(c); return c };
     mk('MWL-NONE', null); mk('MWL-PAST', -45 * M); mk('MWL-SOON', 8 * M); mk('MWL-LATER', 3 * 36e5);
     const d = mk('MWL-DUE', 5 * 36e5); d.items.push({ id: 'dl1', text: 'Call the store', done: false, rem: { at: n - 60000, text: 'Call the store', by: a, setAt: n - 36e5 } }); queueSave(d);
     TRIG++; render(); return a });
