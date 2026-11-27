@@ -1738,7 +1738,8 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('... the link is filled in from the case (numbers made safe for a link)', tl.url === 'https://hpe.example/case/540%201');
     check('... a tool whose number is still empty is greyed out ("needs …"), others open in a new tab', tl.miss.join() === 'ritm' && tl.shelf.includes('tl-tile sleep') && tl.shelf.includes('needs RITM Number') && tl.shelf.includes('target="_blank"') && tl.shelf.includes('Copy IDs'));
     check('... no tool shelf at all on a case type with no tools (nothing changes until tools are set up)', tl.shelfF === '');
-    check('... the settings are for managers and coordinators only, and save as you type to config/tools', A.run("setTabTo0.toString().includes(\"['required','reports','prof','tools'].includes(t)&&!isLead()\")") === true && htmlSrc.includes("wq('tools',()=>dbq.doc('config/tools').set({list:TOOLS,log:TOOL_LOG,ts:Date.now()}))"));
+    check('... the settings are for managers and coordinators only, and save as you type to config/tools', A.run("setTabTo0.toString().includes(\"['required','reports','prof','tools'].includes(t)&&!isLead()\")") === true && htmlSrc.includes("wq('tools',()=>dbq.doc('config/tools').set({list,log:TOOL_LOG,ts}))"));
+    check('... (Nov 27) a copy older than this screen\'s last change, or one arriving while a save waits, does not undo it', A.run("(()=>{const k=TOOLS;TOOLS=[{id:'z1',name:'Keep me',types:['aruba'],url:'https://x'}];TOOL_TS=Date.now();toolsSnap({list:[],ts:Date.now()-3000});const ok1=TOOLS.length===1;toolsSnap({list:[{id:'z2',name:'Newer',types:[],url:'https://y'}],ts:Date.now()+1000});const ok2=TOOLS.length===1&&TOOLS[0].name==='Newer';TOOLS=k;TOOL_TS=0;return ok1&&ok2})()") === true);
     check('playful style is on by default and only changes shapes and motion (colours stay from the theme)', A.run('cuteOn()') === true && htmlSrc.includes("body.cute .cc{border-radius:20px!important;border:2px solid color-mix(in srgb,var(--ac) 10%,#eef0f4)!important") && htmlSrc.includes("body.cute:not(.ssn-on){background-image:"));
     check('... it can be switched off per screen in Settings → Theme', htmlSrc.includes('onchange="cuteSet(this.checked)"') && htmlSrc.includes("localStorage.getItem('pat_cute')!=='0'"));
     check('playful case window and settings: styling only (checklist rows get a style hook, colours from the theme)', htmlSrc.includes("body.cute #set-tabs button.border-\\[\\#0066cc\\]{background:var(--ac)!important") && htmlSrc.includes('return `<div class="ci-row ${it.done?\'ci-done\':\'\'} flex items-start gap-2 py-2 border-b border-gray-100'));
@@ -1939,6 +1940,32 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
       check('... once available (logged in) they can get cases again', A.run("getCase('AB-1').owner") === 'Ab Agent' && A.run("offName('Ok Agent')") === false);
       check('... bulk transfer list marks them (absent) and disables them', htmlSrc.includes("${dayOff(p)||absentNow(p)?'disabled':''}") && htmlSrc.includes("' (absent)'"));
       A.run("isAbsentNow=__ian;ATT_OFF=true;CASES.length=0;Object.keys(ST).filter(k=>/^AB-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
+    }
+    // Nov 27: coordinator scorecard; compact tool tiles; owner picture in the case window
+    {
+      st([ag('Sc Cora', -60, 400), ag('Sc Dan', -60, 400), ag('Sc Agent', -60, 400), ag('Sc Agent2', -60, 400)]);
+      A.run(`(()=>{window.__co=COORDS.slice();window.__cod2=COD;COORDS=['Sc Cora','Sc Dan'];const now=Date.now(),H=36e5;COD={cur:null,hist:[{n:'Sc Cora',from:now-10*H,to:now-2*H}]};
+        window.__scc=CASES.slice();CASES.length=0;
+        const mkx=(id,reqAt,ansAt,who,act)=>{const c=mkCase(id,'Sc Agent',{});c.log=[{ts:reqAt,action:'Transfer requested',by:'Sc Agent asked to transfer this case from Sc Agent to Sc Agent2: waiting for approval by Sc Cora (coordinator on duty)'}];if(ansAt)c.log.unshift({ts:ansAt,action:act||'Transfer approved',by:who+' (coordinator on duty) approved the transfer to Sc Agent2 requested by Sc Agent'});CASES.push(c)};
+        mkx('SC-1',now-9*H,now-9*H+4*6e4,'Sc Cora');mkx('SC-2',now-8*H,now-8*H+8*6e4,'Sc Cora','Transfer rejected');mkx('SC-3',now-7*H,now-7*H+3*6e4,'Jeff Bote');mkx('SC-4',now-20*H,now-20*H+60*6e4,'Sc Cora')})()`);
+      const row = (n, o) => Object.assign({ n, rg: 'APJ', nw: 0, ho: 0, upN: 0, upO: 0, closed: 0, miss: 0, open: 0, ackN: 0, ackMs: 0, act: 0, segs: [], att: { sch: 0, pres: 0, cr: 0, late: 0, lateMin: 0, abs: 0, list: [] } }, o);
+      A.run('window.__D=' + JSON.stringify({ rows: [row('Sc Cora', { nw: 2, ho: 2, upN: 2, upO: 2, act: 2, att: { sch: 5, pres: 5, cr: 5, late: 0, lateMin: 0, abs: 0, list: [] } }), row('Sc Dan', { nw: 1, upN: 1, upO: 5, act: 2 }), row('Sc Agent', { nw: 20, ho: 10, upN: 18, upO: 10, act: 5 }), row('Sc Agent2', { nw: 10, upN: 10, act: 5 })], ev: [] }) + ';__D.f=Date.now()-30*36e5;__D.t=Date.now();__D.allEv=[{own:HOQ,T:Date.now()-5*36e5},{own:HOQ,T:Date.now()-36e5},{own:"Sc Agent",T:Date.now()-5*36e5}];window.__R=scRows(__D)');
+      const R = n => J(A.run(`JSON.stringify((({r,score,rt,v,coord,duty,W})=>({score,rt,v,coord,duty,keys:W?W.map(m=>m.k):null}))(__R.find(x=>x.r.n==='${n}')))`));
+      const c = R('Sc Cora'), d = R('Sc Dan'), a = R('Sc Agent');
+      check('coordinators get the coordinator scorecard; agents keep theirs', c.coord === true && JSON.stringify(c.keys) === '["resp","hand","hoq","prod","rate","mpc","rem","att"]' && !a.coord && a.keys === null);
+      check('... approval response time: average of the requests they answered during their duty (4 and 8 min → 6 min → 4)', c.duty.ans === 2 && Math.round(c.duty.resp / 6e4) === 6 && c.rt.resp === 4, c.duty);
+      check('... requests handled on duty: 2 of the 3 made during the duty (one answered by someone else; the one before the duty not counted) → 1', c.duty.req === 3 && c.rt.hand === 1 && c.v.hand.includes('2 of 3'), c.v.hand);
+      check('... hand-over queue care: reminders past due on queue cases during the duty only (1 of 2; agent-owned not counted → rating 4)', c.duty.hoq === 1 && c.rt.hoq === 4, c.duty);
+      check('... productivity compared with the coordinators\' average (not the agents\')', c.v.prod.includes("coordinators' avg 2.5") && c.rt.prod === 3, c.v.prod);
+      check('... follow-through scored from 3 cases; below that it is left out (weight shared)', c.rt.rate === 5 && d.rt.rate === null && d.v.rate.includes('under 3 cases'));
+      check('... a coordinator with no duty in the period has no duty ratings and needs 3 cases for a score', d.duty === null && d.rt.resp === null && d.rt.hoq === null && d.score === null);
+      check('... overall score shown for the coordinator on duty', typeof c.score === 'number' && c.score >= 1 && c.score <= 5);
+      const card = A.run("scCard(Object.assign(__R.find(x=>x.r.n==='Sc Cora'),{trend:[null,null,null,null]}))");
+      check('... the card says "Coordinator scorecard" and lists the coordinator KPIs', card.includes('Coordinator scorecard') && card.includes('Approval response time') && card.includes('Hand-over queue care'));
+      check('... the score guide and the Excel file include the coordinator table / sheet', htmlSrc.includes('${scTable(SCWC)}') && htmlSrc.includes("'Coordinator scorecard','PAT · Coordinator scorecard"));
+      A.run("COORDS=__co;COD=__cod2;CASES.length=0;__scc.forEach(c=>CASES.push(c))");
+      check('tool tiles in the case window are compact chips', htmlSrc.includes('.tl-tile{display:inline-grid;grid-template-columns:auto minmax(0,1fr)') && htmlSrc.includes('.tl-tile .em{grid-row:span 2;font-size:16px'));
+      check('the case window shows the owner\'s picture (initials when there is none)', htmlSrc.includes(`hasFace(c.owner)?welAvatar(c.owner).replace('class="wl-av"','class="wl-av av-o shrink-0"')`) && htmlSrc.includes('.wl-av.av-o{--d:3rem'));
     }
     A.run("COD={cur:null,hist:[]};xreqRender();hide('mention-modal');NOTICE_OPEN=false;Object.keys(ST).filter(k=>/^(CH|SLA)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
     A.run("COD=__cod;ATT_OFF=__ao2;STAFF=__stf2;CASES.length=0;__cs2.forEach(c=>CASES.push(c));ME={role:'manager',name:'Jeff Bote'};applyMe()");
