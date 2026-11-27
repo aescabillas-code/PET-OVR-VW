@@ -1596,3 +1596,14 @@ hand-over queue moving cases, this happened more often. Reproduced with two scre
 * Windows saved before this: their times were typed in EST, so they are read again as Eastern Time (no stored data is
   changed until someone edits, updates or sets the end of that window; then it is saved in Eastern Time, `tz:'ET'`).
 * Tests: `tests/feature_checks.js` (EST / EDT, older windows, the update fix), `tests/live_mw_reminders.js`.
+
+## Maintenance Window Reminder tile stops blinking when clicked; "⬇ Extract Excel" for the selected tile (Nov 28, 02:00)
+* Clicking the **Maintenance Window Reminder** tile stops its blinking / red flashing (like the Due Reminders tile). It
+  blinks again only when another case — or a new start time — passes its maintenance window start. Remembered on that screen.
+* **⬇ Extract Excel** (on the same line as + Add Case, for everyone): downloads the cases listed for the selected tile —
+  Total, Active, Maintenance Window Reminder, Due Reminders or Completed — with the search, Owner, Status, Reminder and My
+  Cases filters in use. Formatted like the other downloads (title, a line with the view / filters / who and when, green
+  header, borders, filters, every report field). With Maintenance Window Reminder selected it adds "Maintenance window start
+  (EST)" and "Started"; with Due Reminders selected it adds the due reminders and their ETA. File name:
+  `PAT_<View>_<date>.xlsx`.
+* Tests: `tests/live_mw_reminders.js`.
