@@ -1457,3 +1457,59 @@ hand-over queue moving cases, this happened more often. Reproduced with two scre
 * Case window header: slightly tighter spacing so Case status stays on the same line as Severity with the longer
   "Standard · mark high priority" button.
 * Tests: new checks in `tests/feature_checks.js`.
+
+## Tool tiles size, next month's schedule early, crash fix (Nov 27, 16:30)
+* **Tool tiles** are back to the original tile look (big icon, name, number under it), just a little smaller (tiles 100 px
+  wide instead of 112 px, icon 23 px instead of 26 px) — easy to click again.
+* **Shift schedule — month header and next month early:**
+  * The template / export has a **MONTH** row (e.g. "DECEMBER 2026") above the dates, and the title cell says the month
+    ("Month: December 2026 (2026-12)"). The in-app schedule shows the same month banner with **This month · in use**,
+    **Upcoming** or **Past month**.
+  * Uploading a **later month** early (go to that month with ›, download its template, fill it in, upload) only adds those dates:
+    this month's schedule, the team list, the weekly pattern and regions stay as they are, nobody is removed and no case moves.
+    People in the file who are new are added with no shifts until that month; people not in the file are OFF on those dates.
+    When the month starts, the weekly pattern is taken from it automatically (also on pages left open over the 1st).
+    Uploading the current month works as before.
+* **Crashes / visible refreshes:** the background re-reading and re-packing of all data every minute (added Nov 26 for faster
+  opening) is removed — it caused memory peaks on the server, and when the app restarted every open page reloaded (the white
+  flash / "refresh"). It now prepares the data once when the server starts, and later pages pack it when they open, one at a
+  time (several pages opening together share one packing and the old copy is let go first). The page itself was checked for
+  5 minutes of activity with no memory growth.
+* Tests: `tests/feature_checks.js` updated (month header, early upload, roll-over).
+
+## Download all data (Excel) rebuilt, quick exports as Excel, 5-minute set-up time (Nov 27, 17:10)
+* **Download all data (Excel)** (Reports, managers and coordinators) now builds one formatted workbook, sheets in this order
+  (every sheet name written in full):
+  1. **Summary** — dashboard tiles (cases received, active, closed, SLA met, SLA missed, SLA met rate, due misses, productivity),
+     graphs (cases received / closed / active per month, SLA met vs missed per month, SLA missed reasons, due misses per month,
+     agent productivity and due misses this month) and the **Performance by region and period** table (View = Monthly / Weekly /
+     Daily, Period, Region = All regions / APJ / EMEA / AMS: received, closed, active at period end, SLA met / missed / rate, due
+     misses, productivity). Its filter buttons work as the slicers for region, month, week and day. (True Excel slicers need
+     pivot tables, which the Excel library used in the browser cannot create.)
+  2. **All Cases** — every case (open and closed) with all report fields; 3. **Case History** — every action logged on every case.
+  4. **SLA Report** — case, account, owner, SLA type, date and time received, date and time closed, duration (e.g. "1 d 3 h 20 min"
+     and in hours), SLA met / missed, reason (responsible party), closed by.
+  5. **Agent Attendance** — name, date, logged-in time, status (Present / Late / Absent) with a short note.
+  6. **Agent Full Numbers** — the full numbers per agent table, month by month.
+  7. **Due Misses Report** — due time, month, week, case, item, counted for, region, **why it counts for them**, acknowledged by / at.
+  8. **Monthly Scorecard** — the running scorecard: this month to date first, then earlier months (agent and coordinator
+     scorecards), with the KPI results, ratings and manager notes.
+  Then the raw collections as before (now named "Raw data - cases", "Raw data - case history", …). The data comes from the
+  database (all cases and all history, not only what the screen holds); afterwards the screen's report data is put back.
+* **Quick exports** (Case Report, Case Updates, Checklist Detail) are formatted Excel files now (they were plain CSV). All Excel
+  downloads are formatted (title, headers, borders, filters).
+* **5-minute set-up time:** no case is given automatically (new cases, the hand-over queue, end-of-shift hand-overs) in the first
+  5 minutes of an agent's shift, nor in the first 5 minutes after they log in to PAT. Cases wait (Queue / Hand-over Queue) and go
+  out right after, so no due miss is counted for someone who just started. Transfers by hand are not affected.
+* Tests: `tests/live_export_all.js` (new), new and adjusted checks in `tests/feature_checks.js`.
+
+## Hand-over queue batches at 5 minutes past each hour (Nov 27, 17:35)
+* The hourly batches from the hand-over queue now follow the clock: each new hour the queue waits **5 minutes** and then gives
+  every available agent their batch (default 5) — at **10:05, 11:05, 12:05 …** An agent who already got a batch this hour waits
+  for the next hour's :05 (before, it was 60 minutes after their last batch).
+* An agent with no batch in the previous hour — their shift just started or they logged in late — gets their batch as soon as
+  their own 5-minute set-up time is over (5 minutes after the shift start or after logging in, whichever is later), without
+  waiting for :05. From then on they follow the :05 rhythm.
+* Unchanged: the 5-minute set-up time also holds for new cases and end-of-shift hand-overs; batch size setting, order (high
+  priority, overdue, nearest due), never back to the sender in the same shift, transfers by hand.
+* Tests: new checks in `tests/feature_checks.js`.

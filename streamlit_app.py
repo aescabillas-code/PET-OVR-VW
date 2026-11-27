@@ -51,7 +51,6 @@ MAX_ASSET_CHARS = 14_000_000            # ~10 MB file as a base64 data URL (a Mo
 # Connection resilience: a dropped or briefly unreachable MongoDB connection is retried quietly instead of failing.
 RETRY_BUDGET = 6.0                      # seconds one database call keeps retrying a dropped connection before reporting it
 PROBE_GAP = 2.0                         # while MongoDB is unreachable, at most one reconnect attempt per this many seconds
-WARM_EVERY = 60.0                       # seconds between background checks that keep the first-answer data read and packed (only changed collections are re-read)
 KEEPALIVE_EVERY = 25.0                  # seconds between the background pings that keep the connection warm and detect outages
 TRANSIENT_NAMES = {"AutoReconnect", "NetworkTimeout", "ConnectionFailure", "ServerSelectionTimeoutError", "NotPrimaryError",
                    "NotMasterError", "WaitQueueTimeoutError", "ExecutionTimeout", "WTimeoutError", "ConnectionResetError",
@@ -890,10 +889,12 @@ class Bridge:
         self._sizes: Dict[Tuple[str, int], int] = {}     # (collection, version) -> JSON size of the whole collection
         self._bootz: Optional[Tuple[Any, str]] = None    # (snapshot, its compressed text): packed once per snapshot
         self._warm_t: Optional[threading.Thread] = None
+        self._pack_lock = threading.Lock()
 
-    # Faster opening (Nov 26): the data a page gets with its first answer is read and packed in the background — once
-    # when the server starts and again after changes (checked every WARM_EVERY seconds) — so a page that opens does not
-    # wait for the database reads and the packing. Only the same cached snapshot and packed text are kept (no extra memory).
+    # Faster opening (Nov 26): the data a page gets with its first answer is read and packed in the background once, when
+    # the server starts, so the first page does not wait for it. Nov 27: no longer repeated every minute — re-reading and
+    # re-packing everything while people worked added memory peaks on the server (the app crashed and restarted, which
+    # reloaded every open page). Later pages pack it when they open, one at a time (pack_boot), exactly as before.
     def warm(self) -> None:
         try:
             if getattr(self.store, "kind", "") == "mongodb" and getattr(self.store, "down_since", None) is not None:
@@ -902,16 +903,10 @@ class Bridge:
         except Exception:  # noqa: BLE001  the page then reads the data itself, as before
             pass
 
-    def start_warm(self, every: float = 0.0) -> None:
-        every = every or WARM_EVERY
+    def start_warm(self, every: float = 0.0) -> None:  # noqa: ARG002  (kept for older callers; runs once)
         if self._warm_t is not None:
             return
-
-        def loop() -> None:
-            while True:
-                self.warm()
-                time.sleep(every)
-        self._warm_t = threading.Thread(target=loop, name="pet-boot-warm", daemon=True)
+        self._warm_t = threading.Thread(target=self.warm, name="pet-boot-warm", daemon=True)
         self._warm_t.start()
 
     def _size(self, c: str, one: Dict[str, Any]) -> int:
@@ -966,14 +961,22 @@ class Bridge:
         with self.lock:
             if self._bootz is not None and self._bootz[0] is boot:
                 return self._bootz[1]
-        try:
-            raw = json.dumps(json_safe(boot), allow_nan=False, separators=(",", ":")).encode("utf-8")
-            bz = base64.b64encode(gzip.compress(raw, 5)).decode("ascii")
-        except Exception:  # noqa: BLE001  the uncompressed copy is sent instead
-            return None
-        with self.lock:
-            self._bootz = (boot, bz)
-        return bz
+        # Nov 27 (memory): one packing at a time — when several pages open together (a shift start) they wait for the
+        # first one and reuse its result instead of each building its own copy; the previous packed copy is let go first.
+        with self._pack_lock:
+            with self.lock:
+                if self._bootz is not None and self._bootz[0] is boot:
+                    return self._bootz[1]
+                self._bootz = None
+            try:
+                raw = json.dumps(json_safe(boot), allow_nan=False, separators=(",", ":")).encode("utf-8")
+                bz = base64.b64encode(gzip.compress(raw, 5)).decode("ascii")
+                del raw
+            except Exception:  # noqa: BLE001  the uncompressed copy is sent instead
+                return None
+            with self.lock:
+                self._bootz = (boot, bz)
+            return bz
 
     def reply(self, msg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         vers: Optional[Dict[str, int]]
