@@ -1425,3 +1425,35 @@ hand-over queue moving cases, this happened more often. Reproduced with two scre
   notification with **Approve all** (transfer requests), multiple revisits, Absent agents getting no cases, the look changes, the
   clean-up and the faster opening.
 * Tests updated: `tests/feature_checks.js`, `tests/live_sla_and_handlers.js`.
+
+## Announcement scroll + width, tools save the first time (Nov 27)
+* **Important announcement pop-up:** wider (42rem instead of 32rem) and built in three parts — the title bar stays at the top,
+  the message, pictures and files **scroll inside**, and the **✔ Acknowledge** button stays at the bottom, always on screen (also
+  on phones). Before, the playful style cut the card off so a long announcement could not be scrolled to the button.
+* **Tools (Settings → Tools) save the first time:** a copy of the tool list from before your change could come back from the
+  server a moment later and replace your change (and then that older list was saved). Now every change gets a time stamp; while
+  a save is waiting, or when an older copy comes back, it is ignored. Adding, removing, moving and ticking save immediately;
+  typing a name or link saves 0.4 s after the last key and when the page is hidden or closed. Changes from another screen made
+  later still come through.
+* Tests: `tests/live_tools_and_announcement.js` (new), a new check in `tests/feature_checks.js`.
+
+## Coordinator scorecard, compact tool tiles, owner picture in the case window (Nov 27, 15:30)
+* **Coordinator scorecard** (Reports → Scorecard, My productivity, and the Excel file's new *Coordinator scorecard* sheet):
+  coordinators (Settings → Coordinators) are rated with their own KPIs, same 1–5 ratings and status bands as agents:
+  | KPI | Weight | 5 → 1 |
+  |---|---|---|
+  | Approval response time (request → their Approve / Reject, requests made while they were on duty) | 20% | ≤5 min · ≤10 · ≤20 · ≤40 · over 40 min |
+  | Requests handled on duty (answered by them ÷ requests made during their duty; canceled ones left out) | 10% | 100% · 95% · 90% · 80% · under 80% |
+  | Hand-over queue care (reminders past due on queue cases during their duty) | 10% | 0 · 1 · 2 · 3–4 · 5+ |
+  | Productivity per active day, against the **coordinators' average** (days on duty are not active days) | 15% | 100%+ · 85% · 70% · 55% · under 55% |
+  | Follow-through (scored from **3 cases**; below that its weight is shared) | 15% | same as agents |
+  | Due misses per case (own cases) | 10% | same as agents |
+  | Reminders (time to acknowledge and reminders left open, average of both ratings) | 5% | same as agents |
+  | Attendance | 15% | same as agents |
+  The overall score shows from 3 cases, or with any duty in the period. A coordinator with no duty in the period has no duty
+  ratings (their weight is shared by the others). Agents' scorecard is unchanged. The score guide shows both tables.
+* **Tool tiles** in the case window are now small chips (icon left, name and number right) instead of big squares.
+* **Case owner's picture** is shown in the case window's owner bar (initials when there is no picture), like the case list.
+* Case window header: slightly tighter spacing so Case status stays on the same line as Severity with the longer
+  "Standard · mark high priority" button.
+* Tests: new checks in `tests/feature_checks.js`.
