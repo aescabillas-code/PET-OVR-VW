@@ -1573,3 +1573,12 @@ hand-over queue moving cases, this happened more often. Reproduced with two scre
 * **Maintenance window pop-up** appears every time the case is opened, until the maintenance window is updated to a future
   start (or the case is closed). It still does not appear when a case reopens by itself after a refresh.
 * Tests: `tests/feature_checks.js` (old / new / total, due only at the ETA, pop-up on every open).
+
+## Maintenance window pop-up: "Later" until the next hand-over (Nov 27, 21:35)
+* When the **case owner** clicks **Later** on the maintenance window pop-up, it stops popping up for that case (on every
+  screen) while the case stays with that owner. Once the case is **handed over** to someone else, it pops up again for the
+  new owner each time they open it, until they click Later — and so on after every hand-over (also back to an earlier owner).
+* Saved with the case (`mwLater`: who clicked and the ownership it applies to). Closing the pop-up any other way, or Later
+  clicked by someone who is not the owner, does not stop it. Updating the maintenance window to a future start still stops
+  it as before.
+* Tests: `tests/feature_checks.js`, `tests/live_mw_reminders.js`.
