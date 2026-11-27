@@ -1539,3 +1539,37 @@ hand-over queue moving cases, this happened more often. Reproduced with two scre
   counted in the total but not as auto-assigned.
 * Tests: `tests/live_export_all.js` (period filter, tab order, Work Orders and Revisits), `tests/feature_checks.js` (auto /
   new / total, transfer by hand).
+
+## Maintenance window reminders, stronger Due Reminders flash (Nov 27, 19:20)
+* **Due Reminders tile** flashes much harder while reminders are due: thick pulsing red ring with a wide red glow, a slight
+  pulse in size and a fast flashing red inner border (twice as fast for high priority, as before).
+* **New tile: Maintenance Window Reminder** (right after Active Cases). It counts the open cases whose current maintenance
+  window start has passed (closed and CSR-only cases are left out; an updated or added window with a future start no longer
+  counts) and blinks / flashes red like the Due Reminders tile while there are any. Click it to list those cases; click it
+  again (or any other tile, or the "Maintenance window passed ✕" chip) to go back.
+* **Pop-up when a case is opened** that has no maintenance window start, or whose start has already passed: it asks to add or
+  update the maintenance window, with **Go to maintenance window** (scrolls to the section and highlights it) and **Later**.
+  It does not appear when a case is reopened by itself after a refresh.
+* **Notice 10 minutes before the start** for the case owner (bottom right, styled like the transfer approval notice, with the
+  notice sound): "Maintenance window starts in N min", **Acknowledge** / **Acknowledge all** and **Open case**. It stays until
+  acknowledged (for up to 12 hours after the start). Acknowledging is saved with the case (`mwAck`) and written to its Case
+  History ("Maintenance window reminder acknowledged"); it reaches other screens in real time. A changed start time brings
+  the notice back. The acknowledgement does not count as a case update for productivity.
+* **Productivity unchanged:** the Cases today counts in Agent Status (auto / new / total) are display only; the scorecard and
+  reports compute productivity exactly as before (checked in `tests/feature_checks.js`).
+* Tests: `tests/feature_checks.js` (tile, pop-up, notice, acknowledgement, productivity unchanged), new
+  `tests/live_mw_reminders.js` (live, two screens, phone size). Older tests that open cases use `tests/_pw_quiet.js` so the
+  new pop-up does not get in their way.
+
+## Cases today: old / new / total; due only at the ETA; maintenance window pop-up on every open (Nov 27, 20:30)
+* **Agent Status → Cases today** now shows **N old**, **N new**, **N total** on one line, counted the same way as the
+  reports' "Received" columns: *new* = cases the agent received first today (+ Add, round robin, waiting new cases), *old* =
+  older cases given to the agent today (hand-over queue, end-of-shift hand-over, balancing, transfer by hand, bulk upload),
+  each case once; *total* = old + new. (Replaces the "auto" count, which missed some hand-overs.) Display only — the
+  scorecard and report productivity numbers are computed separately and are unchanged.
+* **Due reminders:** the warning alarm 5 minutes before the ETA still rings, but the reminder is no longer counted as due
+  (Due Reminders tile, due filter, naughty list) until its **actual ETA** has passed. A missed due is still counted only
+  after the ETA.
+* **Maintenance window pop-up** appears every time the case is opened, until the maintenance window is updated to a future
+  start (or the case is closed). It still does not appear when a case reopens by itself after a refresh.
+* Tests: `tests/feature_checks.js` (old / new / total, due only at the ETA, pop-up on every open).
