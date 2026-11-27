@@ -2357,6 +2357,24 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run("(()=>{const c=getCase('MW-2');c.mwUp=[{s:Date.now()+36e5,e:null,by:'Mw Amy',ts:Date.now()}];mwqClose();hide('case-modal');openId=null;openCaseModal('MW-2')})()");
     check('... and stops once the maintenance window has a new future start', A.run("$('mwq-pop').classList.contains('hidden')") === true && A.run("mwPast(getCase('MW-2'))") === false);
     A.run("hide('case-modal');openId=null");
+    // Nov 27 (21:35): "Later" by the owner hides the pop-up until the case is handed over; the next owner sees it until they click Later
+    const opn = (who, id) => A.run(`(()=>{ME={role:'agent',name:'${who}'};SIM_USER='${who}';applyMe();mwqClose();hide('case-modal');openId=null;openCaseModal('${id}');return !$('mwq-pop').classList.contains('hidden')})()`);
+    const hand = (id, to) => A.run(`(()=>{const c=getCase('${id}');const oh=Array.isArray(c.ownh)?c.ownh:[{n:c.owner,at:Date.now()-36e5}];oh.push({n:'${to}',at:Date.now()+(oh.length)});c.ownh=oh;c.owner='${to}';RID++})()`);
+    check('owner opens the case: the pop-up shows', opn('Mw Amy', 'MW-1') === true);
+    A.run('mwqLater()');
+    check('... after the owner clicks Later it no longer pops up for that case (saved with the case)', opn('Mw Amy', 'MW-1') === false && opn('Mw Amy', 'MW-1') === false && A.run("!!getCase('MW-1').mwLater&&CX.includes('mwLater')") === true);
+    check('... nor for someone else viewing it while it stays with that owner', opn('Jeff Bote', 'MW-1') === false);
+    hand('MW-1', 'Mw Ben');
+    check('... handed over to another agent: it pops up again for the new owner', opn('Mw Ben', 'MW-1') === true);
+    A.run('mwqClose()');
+    check('... closing it another way (not Later) keeps it coming back', opn('Mw Ben', 'MW-1') === true);
+    A.run("ME={role:'manager',name:'Jeff Bote'};SIM_USER='Jeff Bote';mwqLater()");
+    check('... Later from someone who is not the owner does not stop it for the owner', opn('Mw Ben', 'MW-1') === true);
+    A.run('mwqLater()');
+    check('... once the new owner clicks Later it stops again', opn('Mw Ben', 'MW-1') === false);
+    hand('MW-1', 'Mw Amy');
+    check('... and comes back after the next hand-over (even back to an earlier owner)', opn('Mw Amy', 'MW-1') === true);
+    A.run("mwqClose();hide('case-modal');openId=null;ME={role:'agent',name:'Mw Amy'};SIM_USER='Mw Amy';applyMe()");
     // Nov 27 (20:30): a reminder is due / missed only when its actual ETA passes (not during the 5-minute warning)
     A.run("(()=>{const c=mkCase('DU-1','Mw Amy',{});c.items.push({id:'d1',text:'Within warning',done:false,rem:{at:Date.now()+3*60000,text:'Within warning',by:'Mw Amy',setAt:Date.now()-36e5}},{id:'d2',text:'Past ETA',done:false,rem:{at:Date.now()-60000,text:'Past ETA',by:'Mw Amy',setAt:Date.now()-36e5}});CASES.push(c);TAB='active';DUEF=false;MWF=false;RID++;render()})()");
     check('5 minutes before the ETA a reminder is not counted as due (tile / due list) — only once the ETA has passed', A.run("dueList(getCase('DU-1')).map(x=>x.it?x.it.id:(x.i||x.id||x.r.text)).length") === 1 && A.run("dueList(getCase('DU-1'))[0].r.text") === 'Past ETA' && A.run("pending(getCase('DU-1')).some(x=>x.r.text==='Within warning')") === true && A.run("ALERT_LEAD") > 0, A.run("JSON.stringify({d:dueList(getCase('DU-1')).map(x=>x.r.text),p:pending(getCase('DU-1')).map(x=>x.r.text),L:ALERT_LEAD})"));

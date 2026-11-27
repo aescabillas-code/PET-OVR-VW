@@ -53,6 +53,11 @@ const { chromium } = require('playwright'); const sleep = ms => new Promise(r =>
   if (shots) await pa.screenshot({ path: shots + '/popup_update.png' });
   await A.click('#mwq-pop button:has-text("Later")'); await sleep(300);
   check('... "Later" closes it and the case window stays open', await A.evaluate(() => document.getElementById('mwq-pop').classList.contains('hidden') && !document.getElementById('case-modal').classList.contains('hidden')));
+  await A.evaluate(() => { hide('case-modal'); openId = null; openCaseModal('MWL-PAST') }); await sleep(500);
+  check('... after the owner clicked Later it does not pop up again for that case (Nov 27, 21:35)', await A.evaluate(() => document.getElementById('mwq-pop').classList.contains('hidden') && !!getCase('MWL-PAST').mwLater));
+  w = await until(B, () => { const c = getCase('MWL-PAST'); return !!(c && c.mwLater && c.mwLater.k) });
+  check('... and that choice reaches the other screen (it stays hidden there while the owner keeps the case)', w >= 0 && await B.evaluate(() => { hide('case-modal'); openId = null; openCaseModal('MWL-PAST'); return document.getElementById('mwq-pop').classList.contains('hidden') }));
+  await B.evaluate(() => { hide('case-modal'); openId = null });
   await A.evaluate(() => { hide('case-modal'); openId = null; openCaseModal('MWL-LATER') }); await sleep(400);
   check('... no pop-up for a future maintenance window', await A.evaluate(() => document.getElementById('mwq-pop').classList.contains('hidden')));
   // phone size: tiles wrap, pop-up fits
