@@ -1063,12 +1063,31 @@ def absorb(bridge: Bridge, prev: Optional[Dict[str, Any]], value: Optional[Dict[
 APP_BUILD = ""   # Nov 24: a fingerprint of the page this server hands out; a page left open with an older one reloads quietly
 
 
+_NOTE_RE = re.compile(r"(^|[\s;{}(),])/\*[\s\S]*?\*/")
+_BLOCK_RE = re.compile(r"(<(script|style)\b[^>]*>)([\s\S]*?)(</\2>)", re.I)
+
+
+def _strip_notes(html: str) -> str:
+    """Nov 27: the explanation notes (/* ... */) inside the page's code and styles are left out of the page that is sent to
+    the browser (about 90 KB less to download and read, so it opens faster). The file in the repo keeps them."""
+    def _blk(m):
+        body = m.group(3)
+        if "/*" not in body:
+            return m.group(0)
+        return m.group(1) + _NOTE_RE.sub(lambda x: x.group(1), body) + m.group(4)
+    try:
+        return _BLOCK_RE.sub(_blk, html)
+    except Exception:
+        return html
+
+
 def build_frontend() -> str:
     """Write the component page (the app HTML with the shim injected) and return its directory."""
     global APP_BUILD
     html = (ROOT / "web" / "pet_station.html").read_text(encoding="utf-8")
     shim = (ROOT / "web" / "shim.js").read_text(encoding="utf-8")
     APP_BUILD = hashlib.sha1((html + shim).encode("utf-8")).hexdigest()[:12]
+    html = _strip_notes(html)
     page = html.replace("<head>", "<head><script>window.__PET_BUILD=" + json.dumps(APP_BUILD) + ";" + shim.replace("</script", "<\\/script") + "</script>", 1)
     d = pathlib.Path(tempfile.gettempdir()) / "pet_station_component"
     d.mkdir(parents=True, exist_ok=True)

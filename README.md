@@ -1513,3 +1513,29 @@ hand-over queue moving cases, this happened more often. Reproduced with two scre
 * Unchanged: the 5-minute set-up time also holds for new cases and end-of-shift hand-overs; batch size setting, order (high
   priority, overdue, nearest due), never back to the sender in the same shift, transfers by hand.
 * Tests: new checks in `tests/feature_checks.js`.
+
+## Download all data: period filter, faster, cleaner Summary; Cases today counts (Nov 27, 18:50)
+* **Period to download** (next to "⬇ Download all data (Excel)"): **One month** (month calendar), **Date range** (from / to
+  date calendar; pick the same date for one day) or **Everything** (up to 13 months). Every sheet covers that period.
+* **Summary graphs:** Daily / Weekly / Monthly picker. The Summary tab now holds **graphs only** (no tables): key figures,
+  cases, SLA met / missed, SLA miss reasons, due misses, productivity, performance by region, agents, **revisit reasons** and
+  **cases with several Task IDs (work orders)**.
+* **Performance by Region** has its own tab with separate **Monthly, Weekly and Daily** tables (its graph stays on the Summary).
+* New tab **Work Orders and Revisits**: every case with several Task IDs or revisits, the Task IDs and the revisit reasons
+  (#1, #2 …). The same graph and table are on the in-app dashboard.
+* Raw data tabs are no longer added. New tab order: Summary, Performance by Region, All Cases, Case History, SLA Report, Work
+  Orders and Revisits, Agent Attendance, Agent Full Numbers, Due Misses Report, Monthly Scorecard.
+* **Faster:** case history and attendance are read only for the chosen period, in week-sized pieces (before: everything,
+  starting with one large read). A page crash was found and fixed in `web/shim.js`: after many saves at once (e.g. hundreds of
+  cases with their history) every confirmation re-read and re-wrote the whole list of unsent changes in browser storage,
+  using so much memory that the page could crash during a download. The list is now kept in memory and written together
+  (within 20 ms, and at once when the page is hidden or closed) — unsent changes are still kept across a reload.
+* **Faster opening:** the page sent to the browser leaves out the explanation notes inside the code (about 90 KB less;
+  `streamlit_app.py` → `_strip_notes`). The file in the repo keeps them.
+* **Agent Status → Cases today** shows three pills on one line: **↪ N auto** (cases given automatically today: hand-over queue,
+  end-of-shift hand-over, waiting cases), **N new** (new cases assigned today) and **N total** (every case received today,
+  including transfers by hand, each case once). Before, the first number was the hand-over cases the agent had *updated*,
+  which did not match what they had received. Transfers by hand are now marked in the case's ownership history so they are
+  counted in the total but not as auto-assigned.
+* Tests: `tests/live_export_all.js` (period filter, tab order, Work Orders and Revisits), `tests/feature_checks.js` (auto /
+  new / total, transfer by hand).
