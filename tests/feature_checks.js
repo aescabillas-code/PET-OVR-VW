@@ -1314,10 +1314,15 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('a hand-over case the agent did not update yet is not counted', A.run("dayParts('Rr Cy',simNow()).ho") === 0);
     A.run("ME={role:'agent',name:'Rr Cy'};applyMe();openId=__hc.id;document.getElementById('new-in').value='Call the CE';addItem(__hc.id);openId=null;ME={role:'manager',name:'Jeff Bote'};applyMe()");
     const q = A.run("JSON.stringify(dayParts('Rr Cy',simNow()))");
-    check('cases today are split into handover and new', q === JSON.stringify({ ho: 1, nw: seq.filter(x => x === 'Rr Cy').length }), q);
+    { const o = J(q), nCy = seq.filter(x => x === 'Rr Cy').length;
+      check('cases today: hand-over worked (reports), new, auto-assigned received and the total', o.ho === 1 && o.nw === nCy && o.auto === 1 && o.man === 0 && o.total === nCy + 1, q); }
     A.run("setDash('active');render()");
     const al = String(A.els['agent-list'].innerHTML);
-    check('Agent Status shows the handover count first, then the new cases', /↪ 1 handover<\/span> <span[^>]*>\d+ new/.test(al));
+    check('Agent Status shows auto-assigned received, new and total on one line (Nov 27)', /<span class="inline-flex flex-nowrap[^"]*nw">.*↪ 1 auto<\/span><span[^>]*>\d+ new<\/span><span[^>]*>\d+ total<\/span>/.test(al), al.slice(0, 400));
+    // a transfer by hand is in the total but not in "auto"
+    A.run("window.__mc=CASES.find(c=>c.owner==='Rr Ana'&&!c.closed);reassign(__mc,'Rr Cy','moved by hand','Jeff Bote');RID++");
+    { const o2 = J(A.run("JSON.stringify(dayParts('Rr Cy',simNow()))")), nCy = seq.filter(x => x === 'Rr Cy').length;
+      check('... a case transferred by hand counts in the total, not as auto-assigned', o2.auto === 1 && o2.man === 1 && o2.total === nCy + 2 && A.run("getCase(__mc.id).ownh.slice(-1)[0].m") === 1, o2); }
     A.run("STAFF.forEach(p=>{if(!isMgr(p))p.status='unavailable'});CASES.unshift(mkCase('RR-Q','Queue',{nw:1}));STAFF.find(p=>p.name==='Rr Ben').status='available';eosCheck()");
     check('a new case waiting in the queue goes to the next agent and counts as new for them', A.run("getCase('RR-Q').owner") === 'Rr Ben' && A.run("credOf(getCase('RR-Q')).n") === 'Rr Ben');
   }
@@ -1392,7 +1397,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('her new cases stayed with Amy (5 new + 20 hand-over)', L('Rl Amy') === 25);
     A.run("render()");
     const alh = String(A.els['agent-list'].innerHTML);
-    check('Agent Status shows only the counts (handover worked + new), no share computation', !/÷|Hand-over share/.test(alh) && /handover<\/span> <span[^>]*>\d+ new/.test(alh));
+    check('Agent Status shows only the counts (handover worked + new), no share computation', !/÷|Hand-over share/.test(alh) && /auto<\/span><span[^>]*>\d+ new<\/span><span[^>]*>\d+ total/.test(alh));
     A.run("CASES.filter(c=>c.owner==='Rl Amy'&&isHo(c)).forEach(c=>c.closed=true);STAFF.push(" + JSON.stringify(ag('Rl Dan', -5, 400)) + ");ME={role:'agent',name:'Rl Dan'};localStorage.setItem('pet_signed_in_at',String(Date.now()));localStorage.removeItem('pat_bal_ok')");
     A.run('balanceCatchUp(true)');
     check('a late agent gets the share of the open hand-over cases: 80 ÷ 6 = 13 (a giver with none open is skipped)', H('Rl Dan') === 13 && H('Rl Amy') === 0, ['Rl Amy', 'Rl Ben', 'Rl Cat', 'Rl Dee', 'Rl Eve', 'Rl Dan'].map(H));
