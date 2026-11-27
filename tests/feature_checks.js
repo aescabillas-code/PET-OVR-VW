@@ -135,16 +135,31 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   // ---------- Export current: monthly layout, template colours ----------
   const cells = {}; let blobName = '';
   const mkCell = key => cells[key] || (cells[key] = {});
-  A.ctx.ExcelJS = { Workbook: function () { this.addWorksheet = () => ({ getColumn: () => ({}), getCell: (r, c) => mkCell(r + ':' + c), getRow: r => ({ getCell: c => mkCell(r + ':' + c), set height(v) {} }) }); this.xlsx = { writeBuffer: async () => new Uint8Array([1]) }; } };
+  A.ctx.ExcelJS = { Workbook: function () { this.addWorksheet = () => ({ mergeCells: () => {}, getColumn: () => ({}), getCell: (r, c) => mkCell(r + ':' + c), getRow: r => ({ getCell: c => mkCell(r + ':' + c), set height(v) {} }) }); this.xlsx = { writeBuffer: async () => new Uint8Array([1]) }; } };
   A.ctx.saveBlob = (b, n) => { blobName = n; };
   A.run('STAFF=[{name:"Q One",role:"Support",days:[1,1,1,1,1,0,0],sch:["OFF","09:00-17:00","09:00-17:00","09:00-17:00","09:00-17:00","09:00-17:00","OFF"],msch:{"2026-12-01":"12:00-21:00","2026-12-02":"18:00-03:00","2026-12-03":"OFF","2026-12-04":"PTO","2026-12-05":"Absent"}}];SCH_M="2026-12"');
   await A.run('sExport()');
   const col = (r, c) => (cells[r + ':' + c] && cells[r + ':' + c].fill && cells[r + ':' + c].fill.fgColor.argb);
-  check('export: monthly — dates of the month across the top, weekday row, dark header with yellow dates', cells['3:2'].value === '2026-12-01' && cells['3:32'].value === '2026-12-31' && cells['4:2'].value === 'Tue' && col(3, 2) === 'FF404040' && cells['3:2'].font.color.argb === 'FFFFFF00' && String(cells['1:2'].value).includes('2026-12'));
-  check('export: orange / green shifts by day of the month', cells['5:2'].value === '12:00-21:00' && col(5, 2) === 'FFFFC000' && col(5, 3) === 'FFB7E1A1');
-  check('export: pink OFF, dark-green PTO, Absent in dark red', col(5, 4) === 'FFFFC7CE' && cells['5:4'].font.color.argb === 'FFC00000' && col(5, 5) === 'FF1E6B34' && cells['5:6'].value === 'Absent' && col(5, 6) === 'FF7A1F3D');
-  check('export: a day with no monthly value uses the weekly pattern', cells['5:7'].value === 'OFF' && cells['5:8'].value === '09:00-17:00');
+  check('export: monthly — month header row (Nov 27), dates of the month across the top, weekday row, dark header with yellow dates', cells['3:1'].value === 'MONTH' && cells['3:2'].value === 'DECEMBER 2026' && cells['4:2'].value === '2026-12-01' && cells['4:32'].value === '2026-12-31' && cells['5:2'].value === 'Tue' && col(4, 2) === 'FF404040' && cells['4:2'].font.color.argb === 'FFFFFF00' && String(cells['1:2'].value).includes('December 2026 (2026-12)'));
+  check('export: orange / green shifts by day of the month', cells['6:2'].value === '12:00-21:00' && col(6, 2) === 'FFFFC000' && col(6, 3) === 'FFB7E1A1');
+  check('export: pink OFF, dark-green PTO, Absent in dark red', col(6, 4) === 'FFFFC7CE' && cells['6:4'].font.color.argb === 'FFC00000' && col(6, 5) === 'FF1E6B34' && cells['6:6'].value === 'Absent' && col(6, 6) === 'FF7A1F3D');
+  check('export: a day with no monthly value uses the weekly pattern', cells['6:7'].value === 'OFF' && cells['6:8'].value === '09:00-17:00');
   check('export: file name', blobName === 'PET_Shift_Schedule_2026-12.xlsx');
+  // Nov 27: next month's schedule uploaded early keeps this month as it is
+  {
+    const ym = A.run('curYM()'), [yy, mm] = ym.split('-').map(Number), nx = new Date(yy, mm, 1), nym = nx.getFullYear() + '-' + String(nx.getMonth() + 1).padStart(2, '0');
+    const nd = new Date(nx.getFullYear(), nx.getMonth() + 1, 0).getDate(), days = Array.from({ length: nd }, (_, i) => nym + '-' + String(i + 1).padStart(2, '0'));
+    A.run('window.__stA=STAFF;window.__csA=CASES.slice();STAFF=[{name:"Now One",role:"Support",days:[1,1,1,1,1,0,0],sch:["OFF","06:00-15:00","06:00-15:00","06:00-15:00","06:00-15:00","06:00-15:00","OFF"],start:"06:00",end:"15:00",shift:"06:00-15:00",status:"available"},{name:"Now Two",role:"Support",days:[1,1,1,1,1,0,0],sch:["OFF","13:00-22:00","13:00-22:00","13:00-22:00","13:00-22:00","13:00-22:00","OFF"],start:"13:00",end:"22:00",shift:"13:00-22:00",status:"available"}];ensureMgrs(STAFF);CASES.length=0;window.__cn=mkCase("MA-1","Now Two",{});CASES.push(__cn)');
+    const res = { out: [{ name: 'Now One', m: Object.fromEntries(days.map(k => [k, '21:00-06:00'])) }, { name: 'Next Newbie', m: Object.fromEntries(days.map(k => [k, '06:00-15:00'])) }], warn: 0, keys: days };
+    A.run('window.__spr=syncProfileRegistry;window.__sprl=saveProfileRegistryLocal;window.__srf=sRefresh;syncProfileRegistry=()=>{};saveProfileRegistryLocal=()=>{};sRefresh=()=>{};applyMonth(' + JSON.stringify(res) + ');syncProfileRegistry=__spr;saveProfileRegistryLocal=__sprl;sRefresh=__srf');
+    check('next month uploaded early: nobody is removed and no case moves (Now Two is not in the file)', A.run("STAFF.some(p=>p.name==='Now Two')&&getCase('MA-1').owner==='Now Two'") === true);
+    check('... this month keeps its weekly pattern and shift times', A.run("JSON.stringify([pers('Now One').start,pers('Now One').sch[1]])") === '["06:00","06:00-15:00"]');
+    check('... next month\'s dates are saved for each person (Now One nights; Now Two OFF; the new person added)', A.run(`[schedVal(pers('Now One'),new Date('${days[2]}T00:00:00')),schedVal(pers('Now Two'),new Date('${days[2]}T00:00:00')),schedVal(pers('Next Newbie'),new Date('${days[2]}T00:00:00'))].join('|')`) === '21:00-06:00|OFF|06:00-15:00');
+    check('... the new person has no shifts this month', A.run("pers('Next Newbie').sch.every(x=>x==='OFF')") === true);
+    check('... when that month starts the weekly pattern follows it', A.run(`(()=>{const o=curYM;curYM=()=>'${nym}';const n=mschRoll(STAFF);curYM=o;return n>=2&&pers('Now One').sch.includes('21:00-06:00')&&pers('Now One').start==='21:00'})()`) === true);
+    check('... the in-app schedule shows a month header (this month / upcoming)', A.run(`(()=>{SCH_M='${nym}';const h=shiftTab();SCH_M='';return h.includes('class="sch-month"')&&h.includes('Upcoming')})()`) === true);
+    A.run('STAFF=__stA;CASES.length=0;__csA.forEach(c=>CASES.push(c));Object.keys(ST).filter(k=>/^MA-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})');
+  }
 
   // ---------- cases: checklist, acknowledge, reminders, maintenance window ----------
   A.run("GOT.cases=1;GOT.act=1;STAFF=" + A.run('JSON.stringify(STAFF)').replace(/^/, ''));
@@ -416,7 +431,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   {let got=null;const __sb=A.ctx.saveBlob;if(!A.ctx.Blob)A.ctx.Blob=Blob;if(!A.ctx.atob)A.ctx.atob=atob;A.ctx.saveBlob=(b,n)=>{got={b,n}};
    const repoB64=require('fs').readFileSync(path.join(root,'templates/PET_Shift_Schedule_Template.xlsx')).toString('base64');
    A.ctx.__petTemplate=()=>Promise.resolve({name:'PET_Shift_Schedule_Template.xlsx',b64:repoB64});
-   {const __x=A.ctx.ExcelJS;A.ctx.ExcelJS={Workbook:function(){this.addWorksheet=()=>({getColumn:()=>({}),getCell:()=>({}),getRow:()=>({getCell:()=>({}),set height(v){}})});this.xlsx={writeBuffer:async()=>new Uint8Array([1,2])}}};A.run("SCH_M='2026-12'");await A.ctx.sTemplate();check('the Template button builds the monthly template for the month shown (names and the dates of the month)', !!got&&got.n==='PET_Shift_Schedule_Template_2026-12.xlsx');got=null;A.ctx.ExcelJS=undefined;
+   {const __x=A.ctx.ExcelJS;A.ctx.ExcelJS={Workbook:function(){this.addWorksheet=()=>({mergeCells:()=>{},getColumn:()=>({}),getCell:()=>({}),getRow:()=>({getCell:()=>({}),set height(v){}})});this.xlsx={writeBuffer:async()=>new Uint8Array([1,2])}}};A.run("SCH_M='2026-12'");await A.ctx.sTemplate();check('the Template button builds the monthly template for the month shown (names and the dates of the month)', !!got&&got.n==='PET_Shift_Schedule_Template_2026-12.xlsx');got=null;A.ctx.ExcelJS=undefined;
    await A.ctx.sTemplate();check('without the Excel library it downloads the file kept in the repo (templates/)', !!got&&got.n==='PET_Shift_Schedule_Template.xlsx'&&got.b.size===Buffer.from(repoB64,'base64').length);
    got=null;A.ctx.__petTemplate=()=>Promise.reject(new Error('offline'));await A.ctx.sTemplate();check('it falls back to the built-in copy when the repo file cannot be reached', !!got&&got.b.size>1000);
    A.ctx.__petTemplate=undefined;A.ctx.saveBlob=__sb;A.ctx.ExcelJS=__x}}
@@ -728,17 +743,26 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
       A.run("CASES.length=0;for(let i=0;i<4;i++)CASES.push(mkCase('HO-'+i,'Gone Gary',{}))");
       A.run('eosCheck()');
       check('if nobody is on shift yet the cases wait for the first agent to start', A.run("CASES.every(c=>c.owner==='Gone Gary')") === true);
-      ho([ag('Gone Gary', -540, -10), ag('Starter Sam', -5, 480), ag('Starter Sue', -3, 480), ag('Early Ed', -300, 240)]);
+      ho([ag('Gone Gary', -540, -10), ag('Starter Sam', -8, 480), ag('Starter Sue', -6, 480), ag('Early Ed', -300, 240)]);   // Nov 27: past their 5-minute set-up time
       A.run("CASES.length=0;for(let i=0;i<6;i++)CASES.push(mkCase('HO-'+i,'Gone Gary',{}))");
       A.run('eosCheck()');
       const own = J(A.run("JSON.stringify(CASES.map(c=>c.owner))"));
       check('the cases are shared evenly between everyone on shift', ['Starter Sam', 'Starter Sue', 'Early Ed'].every(n => own.filter(o => o === n).length === 2) && !own.includes('Gone Gary'), own);
       A.run('eosCheck();eosCheck();rebalanceEos(simNow())');
       check('a later check moves nothing back', J(A.run("JSON.stringify(CASES.map(c=>c.owner))")).join() === own.join());
-      ho([ag('Gone Gary', -540, -10), ag('Starter Sam', -5, 25), ag('Starter Sue', -3, 480)]);
+      ho([ag('Gone Gary', -540, -10), ag('Starter Sam', -8, 25), ag('Starter Sue', -6, 480)]);
       A.run("CASES.length=0;for(let i=0;i<4;i++)CASES.push(mkCase('HO-'+i,'Gone Gary',{}))");
       A.run('eosCheck()');
       check('someone near EOS does not receive hand-overs', A.run("CASES.every(c=>c.owner==='Starter Sue')") === true);
+      // Nov 27: the first 5 minutes of a shift are set-up time: no automatic cases yet
+      ho([ag('Gone Gary', -540, -10), ag('Fresh Fay', -2, 480), ag('Early Ed', -300, 240)]);
+      A.run("CASES.length=0;for(let i=0;i<4;i++)CASES.push(mkCase('HO-'+i,'Gone Gary',{}))");
+      A.run('eosCheck()');
+      check('5-minute set-up: an agent 2 min into the shift gets no hand-overs or new cases yet', A.run("CASES.every(c=>c.owner==='Early Ed')") === true && A.run("inSetup(pers('Fresh Fay'),simNow())") === true && A.run("coverFor(simNow(),null,undefined,true)") === 'Early Ed' && A.run("SETUP_MIN") === 5);
+      ho([ag('Gone Gary', -540, -10), ag('Fresh Fay', -2, 480)]);
+      A.run("CASES.length=0;for(let i=0;i<2;i++)CASES.push(mkCase('HO-'+i,'Gone Gary',{}))");
+      A.run('eosCheck()');
+      check('... when only agents in set-up are on shift, the cases wait (no due miss is counted for them meanwhile)', A.run("CASES.every(c=>c.owner==='Gone Gary'||c.owner===HOQ)") === true);
       // manual hand-over before EOS: shared evenly, waits for the receivers, never bounced
       ho([ag('Ending Eva', -480, 40), ag('Mid Max', -200, 300), ag('Mid Mia', -200, 300), ag('Later Lia', 30, 540)]);
       A.run("CASES.length=0;for(let i=0;i<8;i++)CASES.push(mkCase('MH-'+i,'Ending Eva',{}));ME={role:'agent',name:'Ending Eva'};applyMe();render()");
@@ -1632,7 +1656,8 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('the monthly template is read: names, every date of the month, Absent', mr.n === 2 && mr.names.join() === 'Ms Amy,Dee New' && mr.d3 === 'Absent' && mr.k === 31, JSON.stringify(mr));
     A.run("applyMonth(monthRows(__wb));XLSX=__X");
     check('upload keeps each person\'s days by date and shows that month', A.run("pers('Ms Amy').msch['2026-12-01']") === '14:00-23:00' && A.run("pers('Dee New').msch['2026-12-03']") === 'Absent' && A.run('SCH_M') === '2026-12');
-    check('the weekly pattern is derived from the month (fallback for days without a monthly value)', A.run("pers('Ms Amy').sch.filter(v=>v==='14:00-23:00').length") === 5);
+    if (A.run('curYM()') < '2026-12') check('the weekly pattern is derived from the month (Nov 27: a later month uploaded early is used from its 1st)', A.run("pers('Ms Amy').sch.filter(v=>v==='14:00-23:00').length") === 0 && A.run("(()=>{const o=curYM;curYM=()=>'2026-12';mschRoll(STAFF);curYM=o;return pers('Ms Amy').sch.filter(v=>v==='14:00-23:00').length})()") === 5);
+    else check('the weekly pattern is derived from the month (fallback for days without a monthly value)', A.run("pers('Ms Amy').sch.filter(v=>v==='14:00-23:00').length") === 5);
     A.run("setTabTo('shift')");
     const sb = String(A.els['set-body'].innerHTML);
     check('the Shift Schedule shows the whole month (1–31) with month navigation', sb.includes('Shift Schedule · Monthly') && sb.includes('type="month" value="2026-12"') && sb.includes('>31<br>Thu<') && sb.includes("sSetD("));
@@ -1647,7 +1672,8 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run("render()");
     check('Agent Status shows Absent', String(A.els['agent-list'].innerHTML).includes('>Absent</span>'));
     A.run("ME={role:'agent',name:'At Amy'};applyMe();recordAtt()");
-    check('logging in records the time and removes Absent (late after the start)', A.run("isAbsentNow(pers('At Amy'),simNow())") === false && A.run("onlineAgents(simNow()).some(p=>p.name==='At Amy')") === true && A.run("ATT[attId('At Amy',dkey(wall(Date.now())))].late") >= 119);
+    check('logging in records the time and removes Absent (late after the start)', A.run("isAbsentNow(pers('At Amy'),simNow())") === false && A.run("ATT[attId('At Amy',dkey(wall(Date.now())))].late") >= 119);
+    check('... (Nov 27) the first 5 minutes after logging in are set-up time: no automatic cases yet, then they get cases', A.run("onlineAgents(simNow()).some(p=>p.name==='At Amy')") === false && A.run("(()=>{const a=ATT[attId('At Amy',dkey(wall(Date.now())))],k=a.in;a.in=Date.now()-6*6e4;const ok=onlineAgents(simNow()).some(p=>p.name==='At Amy');a.in=k;return ok})()") === true);
     // Nov 23 fix: the log-in is also recorded when the attendance list arrives after signing in, or when already signed in from before
     A.run("window.__k=attId('At Amy',dkey(wall(Date.now())));delete ATT[__k];ATTPEND.clear();delete ATT_MINE[__k];GOT.att=0;ATT_FROM=Date.now()-100*6e4;ME={role:'agent',name:'At Amy'};applyMe();SAVED_PENDING=false;window.__r=recordAtt()");
     // Nov 25: the agent's screen no longer waits for the attendance list (it checks the saved record of the shift itself)
@@ -1707,7 +1733,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     {
       const cells2 = {}; const mk2 = k => cells2[k] || (cells2[k] = {});
       const xl0 = A.ctx.ExcelJS, sb0 = A.ctx.saveBlob;
-      A.ctx.ExcelJS = { Workbook: function () { this.addWorksheet = () => ({ getColumn: () => ({}), getCell: (r, c) => mk2(r + ':' + c), mergeCells() {}, getRow: r => ({ getCell: c => mk2(r + ':' + c), set height(v) {} }) }); this.xlsx = { writeBuffer: async () => new Uint8Array([1]) }; } };
+      A.ctx.ExcelJS = { Workbook: function () { this.addWorksheet = () => ({ mergeCells: () => {}, getColumn: () => ({}), getCell: (r, c) => mk2(r + ':' + c), mergeCells() {}, getRow: r => ({ getCell: c => mk2(r + ':' + c), set height(v) {} }) }); this.xlsx = { writeBuffer: async () => new Uint8Array([1]) }; } };
       A.ctx.saveBlob = () => {};
       A.run("window.__rc=CASES.slice();window.__rf=[RPT.from,RPT.to,RPT.account,RPT.type,RPT.status];CASES.length=0;CASES.push(mkCase('AC-1','Haina Azuela',{account:'Acct P',recv:Date.now()-2000}),mkCase('AC-2','Haina Azuela',{account:'Acct Q',recv:Date.now()-1000}));CASES[0].store='1234';CASES[1].store='N/A';RPT.from=RPT.to=ymd(wall(Date.now()));RPT.account='all';RPT.type='all';RPT.status='all';window.__rn=window.__petRealNames;window.__petRealNames=async l=>({configured:true,map:{[acctNorm('Acct P')]:'Real P Inc',[acctNorm('Acct Q')]:'Real Q Inc'},missing:[]});RPT.cols=['account'];RPT.acctMode='store'");
       await A.run("exportXlsx('custom')");
@@ -1752,7 +1778,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     {
       const cells3 = {}; let saved3 = 0; const mk3 = k => cells3[k] || (cells3[k] = {});
       const xl0 = A.ctx.ExcelJS, sb0 = A.ctx.saveBlob;
-      A.ctx.ExcelJS = { Workbook: function () { this.addWorksheet = () => ({ getColumn: () => ({}), getCell: (r, c) => mk3(r + ':' + c), mergeCells() {}, getRow: r => ({ getCell: c => mk3(r + ':' + c), set height(v) {} }) }); this.xlsx = { writeBuffer: async () => new Uint8Array([1]) }; } };
+      A.ctx.ExcelJS = { Workbook: function () { this.addWorksheet = () => ({ mergeCells: () => {}, getColumn: () => ({}), getCell: (r, c) => mk3(r + ':' + c), mergeCells() {}, getRow: r => ({ getCell: c => mk3(r + ':' + c), set height(v) {} }) }); this.xlsx = { writeBuffer: async () => new Uint8Array([1]) }; } };
       A.ctx.saveBlob = () => { saved3++ };
       await A.run("exportXlsx('custom')");
       check('... and an agent can download the report builder Excel too', saved3 === 1 && String(A.els['set-body'].innerHTML).includes("exportXlsx('custom')"), saved3);
@@ -1803,8 +1829,15 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('... the case history shows the move to the queue and the assignment from it', A.run("CASES.filter(c=>c.owner==='Hq Amy').every(c=>c.log.some(l=>/moved to the hand-over queue/.test(l.details||''))&&c.log.some(l=>String(l.details||'').includes('Hand-over queue: case assigned to Hq Amy (from Hq Gail)')))") === true, A.run("JSON.stringify(CASES.find(c=>c.owner==='Hq Amy').log.map(l=>l.details))"));
     A.run('eosCheck()');
     check('... no second batch before the hour is up', L('Hq Amy') === 5 && L('Hq Ben') === 5 && L('Hand-over Queue') === 2);
-    ago('Hq Amy', 61); ago('Hq Ben', 61); A.run('eosCheck()');
+    ago('Hq Amy', 125); ago('Hq Ben', 125); A.run('eosCheck()');   // Nov 27: batches follow the clock (:05); two clock hours back keeps this check independent of the minute it runs
     check('... another batch an hour later (the 2 left go out)', L('Hand-over Queue') === 0 && L('Hq Amy') + L('Hq Ben') === 12 && Math.abs(L('Hq Amy') - L('Hq Ben')) <= 0, [L('Hq Amy'), L('Hq Ben')].join());
+    {   // Nov 27 (17:30): batches at 5 minutes past each clock hour; late log-in: after their own 5-minute set-up
+      const h = A.run("hourStart(Date.now())"), M = 6e4, nf = (t0, now) => A.run(`hoqNextFor('X',{X:${t0}},${now})`);
+      check('hourly batches follow the clock: got one this hour → next at :05 of the next hour', nf(h + 10 * M, h + 20 * M) === h + 65 * M);
+      check('... got one last hour → waits until 5 minutes past this hour, then gets the next', nf(h - 30 * M, h + 2 * M) === h + 5 * M && nf(h - 30 * M, h + 6 * M) === 0);
+      check('... no batch last hour (shift just started / logged in late) → right after their own 5-minute set-up, even before :05', nf(0, h + 1 * M) === 0 && nf(h - 130 * M, h + 2 * M) === 0 && htmlSrc.includes('&&!inSetup(p,now))}'));
+      check('... the 5-per-hour batch size is unchanged and the Settings text says when', A.run("HO_BATCH") === 5 && A.run("hoqSetHtml(false)").includes('at 5 minutes past the hour'));
+    }
     check('... the queue owner is never counted as a person (productivity, misses)', A.run("QN(HOQ)&&!credsOf(CASES[0]).some(x=>x.n===HOQ)") === true);
     // priority: high priority, then past due (most overdue first), then nearest due, then the rest
     st([ag('Hq Gail', -540, -5), ag('Hq Cy', -100, 300)]);
@@ -1964,7 +1997,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
       check('... the card says "Coordinator scorecard" and lists the coordinator KPIs', card.includes('Coordinator scorecard') && card.includes('Approval response time') && card.includes('Hand-over queue care'));
       check('... the score guide and the Excel file include the coordinator table / sheet', htmlSrc.includes('${scTable(SCWC)}') && htmlSrc.includes("'Coordinator scorecard','PAT · Coordinator scorecard"));
       A.run("COORDS=__co;COD=__cod2;CASES.length=0;__scc.forEach(c=>CASES.push(c))");
-      check('tool tiles in the case window are compact chips', htmlSrc.includes('.tl-tile{display:inline-grid;grid-template-columns:auto minmax(0,1fr)') && htmlSrc.includes('.tl-tile .em{grid-row:span 2;font-size:16px'));
+      check('tool tiles: the original look, a little smaller (easy to click)', !htmlSrc.includes('.tl-tile{display:inline-grid') && htmlSrc.includes('.tl-tiles{grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:9px}') && htmlSrc.includes('.tl-tile .em{font-size:23px}'));
       check('the case window shows the owner\'s picture (initials when there is none)', htmlSrc.includes(`hasFace(c.owner)?welAvatar(c.owner).replace('class="wl-av"','class="wl-av av-o shrink-0"')`) && htmlSrc.includes('.wl-av.av-o{--d:3rem'));
     }
     A.run("COD={cur:null,hist:[]};xreqRender();hide('mention-modal');NOTICE_OPEN=false;Object.keys(ST).filter(k=>/^(CH|SLA)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)})");
