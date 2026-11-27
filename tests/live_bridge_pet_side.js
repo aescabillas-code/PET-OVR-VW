@@ -11,7 +11,7 @@ const im = (op, a) => JSON.parse(execFileSync('python3', ['-I', '-c',
   'import sys,json;sys.path.insert(0,sys.argv[1]);import im_pet_bridge as b;print(json.dumps(b.execute(b.FakeDB(sys.argv[2]),sys.argv[3],json.loads(sys.argv[4]),"IM")))',
   path.join(__dirname, '..'), FILE, op, JSON.stringify(a)]).toString());
 (async () => {
-  const b = await chromium.launch();
+  const b = await require('./_pw_quiet').launch();
   const ctx = await b.newContext({ viewport: { width: 1400, height: 900 } }); const p = await ctx.newPage(); const errs = [];
   p.on('pageerror', e => errs.push(String(e).slice(0, 200)));
   await p.goto('http://127.0.0.1:' + process.argv[2] + '/'); await sleep(3500);

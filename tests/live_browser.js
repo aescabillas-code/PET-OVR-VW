@@ -2,7 +2,7 @@ const { chromium } = require('playwright');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
   const url = 'http://127.0.0.1:' + process.argv[2] + '/';
-  const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 1500, height: 950 } });
+  const b = await require('./_pw_quiet').launch(); const ctx = await b.newContext({ viewport: { width: 1500, height: 950 } });
   const open = async () => { const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(String(e).slice(0, 160))); await p.goto(url); await sleep(3000); const f = p.frames().find(x => x.url().includes('/app')); return { p, f, errs }; };
   const A = await open(), B = await open();
   const out = {}; let fails = 0; const check = (n, ok, x) => { console.log((ok ? 'PASS ' : 'FAIL ') + n + (ok ? '' : '  ' + JSON.stringify(x))); if (!ok) fails++; };

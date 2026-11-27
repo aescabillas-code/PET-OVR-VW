@@ -2,7 +2,7 @@
 const { chromium } = require('playwright'), path = require('path');
 let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
 (async () => {
-  const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1200, height: 850 } });
+  const b = await require('./_pw_quiet').launch(); const p = await b.newPage({ viewport: { width: 1200, height: 850 } });
   const errs = []; p.on('pageerror', e => errs.push(String(e)));
   await p.goto('file://' + path.join(__dirname, '..', 'web', 'pet_station.html')); await p.waitForTimeout(2500);
   await p.evaluate(() => { ME = { role: 'manager', name: 'Jeff Bote' }; applyMe(); document.getElementById('landing').style.display = 'none'; CASES.length = 0; CASES.push(mkCase('PET-9', STAFF[1].name, {})); render(); openCaseModal('PET-9'); });

@@ -4,7 +4,7 @@
 const MOCKXL = require('fs').readFileSync(require('path').join(__dirname, 'mock_exceljs.js'), 'utf8');   // the Excel library comes from the internet; this test uses a stand-in
 const { chromium } = require('playwright'); const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
-  const b = await chromium.launch(); let fails = 0; const errs = []; const check = (n, ok, x) => { console.log((ok ? 'PASS ' : 'FAIL ') + n + (ok ? '' : '  ' + JSON.stringify(x))); if (!ok) fails++; };
+  const b = await require('./_pw_quiet').launch(); let fails = 0; const errs = []; const check = (n, ok, x) => { console.log((ok ? 'PASS ' : 'FAIL ') + n + (ok ? '' : '  ' + JSON.stringify(x))); if (!ok) fails++; };
   const open = async () => { const ctx = await b.newContext({ acceptDownloads: true }); const p = await ctx.newPage(); p.on('pageerror', e => errs.push(String(e).slice(0, 200))); await p.goto('http://127.0.0.1:' + process.argv[2] + '/'); await sleep(3500); return [p, p.frames().find(x => x.url().includes('/app'))]; };
   const [pa, A] = await open();
   const cid = await A.evaluate(() => { STAFF = J(DEMO_STAFF).map(p => { delete p.demo; return p }); ensureMgrs(STAFF); STAFFLOADED = true; saveStaff(true, true); ME = { role: 'manager', name: 'Jeff Bote' }; applyMe(); saveMe(); lpHide(); try { hideWelcome() } catch (e) {}

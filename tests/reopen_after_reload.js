@@ -4,7 +4,7 @@ const { chromium } = require('playwright');
 let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
 (async () => {
   const port = process.argv[2] || '8765';
-  const b = await chromium.launch(); const ctx = await b.newContext(); const p = await ctx.newPage();
+  const b = await require('./_pw_quiet').launch(); const ctx = await b.newContext(); const p = await ctx.newPage();
   const errs = []; p.on('pageerror', e => errs.push(String(e)));
   const fr = () => p.frames().find(f => f.url().includes('/app'));
   const signIn = () => fr().evaluate(() => { ME = { role: 'manager', name: 'Jeff Bote' }; applyMe(); });

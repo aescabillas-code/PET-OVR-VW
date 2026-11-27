@@ -5,7 +5,7 @@
 const { chromium } = require('playwright');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
-  const b = await chromium.launch();
+  const b = await require('./_pw_quiet').launch();
   const open = async port => { const ctx = await b.newContext({ viewport: { width: 1400, height: 900 } }); const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(String(e).slice(0, 200))); await p.goto('http://127.0.0.1:' + port + '/'); await sleep(3500); const f = p.frames().find(x => x.url().includes('/app')); return { p, f, errs }; };
   let fails = 0; const check = (n, ok, x) => { console.log((ok ? 'PASS ' : 'FAIL ') + n + (ok ? '' : '  ' + JSON.stringify(x))); if (!ok) fails++; };
   const wait = async (X, fn, arg, max = 10000) => { const t = Date.now(); while (Date.now() - t < max) { if (await X.f.evaluate(fn, arg)) return Date.now() - t; await sleep(50); } return -1; };

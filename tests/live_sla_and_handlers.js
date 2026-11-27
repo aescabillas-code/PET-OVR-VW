@@ -4,7 +4,7 @@
 //   python3 tests/live_host.py . 8825 &   node tests/live_sla_and_handlers.js 8825 [screenshot-dir]
 const { chromium } = require('playwright'); const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
-  const b = await chromium.launch(); let fails = 0; const errs = []; const check = (n, ok, x) => { console.log((ok ? 'PASS ' : 'FAIL ') + n + (ok ? '' : '  ' + JSON.stringify(x))); if (!ok) fails++; };
+  const b = await require('./_pw_quiet').launch(); let fails = 0; const errs = []; const check = (n, ok, x) => { console.log((ok ? 'PASS ' : 'FAIL ') + n + (ok ? '' : '  ' + JSON.stringify(x))); if (!ok) fails++; };
   const shots = process.argv[3] || '';
   const open = async () => { const ctx = await b.newContext({ viewport: { width: 1400, height: 900 } }); const p = await ctx.newPage(); p.on('pageerror', e => errs.push(String(e).slice(0, 200))); await p.goto('http://127.0.0.1:' + process.argv[2] + '/'); await sleep(3500); return [p, p.frames().find(x => x.url().includes('/app'))]; };
   const [pa, A] = await open();

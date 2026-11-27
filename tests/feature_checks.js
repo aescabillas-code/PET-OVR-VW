@@ -351,7 +351,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
   A.run("setDash('active')"); check('Active tile shows only open cases', !ids().includes('TILE-CLOSED') && ids().length >= 4);
   A.run("ackTile()"); check('Due tile filters to cases with due reminders', ids().join() === 'SORT-OVERDUE' && String(A.els['stats'].innerHTML).includes('stat-sel'));
   A.run("ackTile()"); check('clicking the Due tile again clears the filter', ids().length >= 4);
-  check('tiles are clickable', (String(A.els['stats'].innerHTML).match(/onclick=/g) || []).length === 4);
+  check('tiles are clickable', (String(A.els['stats'].innerHTML).match(/onclick=/g) || []).length === 5);   // Nov 27: + Maintenance Window Reminder
 
   // ---------- the profile stays until another profile is selected ----------
   A.run("ME={role:'manager',name:'Jeff Bote'};checkMe()");
@@ -1315,14 +1315,14 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     A.run("ME={role:'agent',name:'Rr Cy'};applyMe();openId=__hc.id;document.getElementById('new-in').value='Call the CE';addItem(__hc.id);openId=null;ME={role:'manager',name:'Jeff Bote'};applyMe()");
     const q = A.run("JSON.stringify(dayParts('Rr Cy',simNow()))");
     { const o = J(q), nCy = seq.filter(x => x === 'Rr Cy').length;
-      check('cases today: hand-over worked (reports), new, auto-assigned received and the total', o.ho === 1 && o.nw === nCy && o.auto === 1 && o.man === 0 && o.total === nCy + 1, q); }
+      check('cases today: hand-over worked (reports), old cases received, new and the total (Nov 27, 20:30)', o.ho === 1 && o.nw === nCy && o.old === 1 && o.total === nCy + 1 && o.auto === undefined, q); }
     A.run("setDash('active');render()");
     const al = String(A.els['agent-list'].innerHTML);
-    check('Agent Status shows auto-assigned received, new and total on one line (Nov 27)', /<span class="inline-flex flex-nowrap[^"]*nw">.*↪ 1 auto<\/span><span[^>]*>\d+ new<\/span><span[^>]*>\d+ total<\/span>/.test(al), al.slice(0, 400));
+    check('Agent Status shows old, new and total on one line (Nov 27, 20:30)', /<span class="inline-flex flex-nowrap[^"]*nw">.*>1 old<\/span><span[^>]*>\d+ new<\/span><span[^>]*>\d+ total<\/span>/.test(al), al.slice(0, 400));
     // a transfer by hand is in the total but not in "auto"
     A.run("window.__mc=CASES.find(c=>c.owner==='Rr Ana'&&!c.closed);reassign(__mc,'Rr Cy','moved by hand','Jeff Bote');RID++");
     { const o2 = J(A.run("JSON.stringify(dayParts('Rr Cy',simNow()))")), nCy = seq.filter(x => x === 'Rr Cy').length;
-      check('... a case transferred by hand counts in the total, not as auto-assigned', o2.auto === 1 && o2.man === 1 && o2.total === nCy + 2 && A.run("getCase(__mc.id).ownh.slice(-1)[0].m") === 1, o2); }
+      check('... a case transferred by hand counts as an old case and in the total', o2.old === 2 && o2.total === nCy + 2 && A.run("getCase(__mc.id).ownh.slice(-1)[0].m") === 1, o2); }
     A.run("STAFF.forEach(p=>{if(!isMgr(p))p.status='unavailable'});CASES.unshift(mkCase('RR-Q','Queue',{nw:1}));STAFF.find(p=>p.name==='Rr Ben').status='available';eosCheck()");
     check('a new case waiting in the queue goes to the next agent and counts as new for them', A.run("getCase('RR-Q').owner") === 'Rr Ben' && A.run("credOf(getCase('RR-Q')).n") === 'Rr Ben');
   }
@@ -1397,7 +1397,7 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('her new cases stayed with Amy (5 new + 20 hand-over)', L('Rl Amy') === 25);
     A.run("render()");
     const alh = String(A.els['agent-list'].innerHTML);
-    check('Agent Status shows only the counts (handover worked + new), no share computation', !/÷|Hand-over share/.test(alh) && /auto<\/span><span[^>]*>\d+ new<\/span><span[^>]*>\d+ total/.test(alh));
+    check('Agent Status shows only the counts (handover worked + new), no share computation', !/÷|Hand-over share/.test(alh) && /old<\/span><span[^>]*>\d+ new<\/span><span[^>]*>\d+ total/.test(alh));
     A.run("CASES.filter(c=>c.owner==='Rl Amy'&&isHo(c)).forEach(c=>c.closed=true);STAFF.push(" + JSON.stringify(ag('Rl Dan', -5, 400)) + ");ME={role:'agent',name:'Rl Dan'};localStorage.setItem('pet_signed_in_at',String(Date.now()));localStorage.removeItem('pat_bal_ok')");
     A.run('balanceCatchUp(true)');
     check('a late agent gets the share of the open hand-over cases: 80 ÷ 6 = 13 (a giver with none open is skipped)', H('Rl Dan') === 13 && H('Rl Amy') === 0, ['Rl Amy', 'Rl Ben', 'Rl Cat', 'Rl Dee', 'Rl Eve', 'Rl Dan'].map(H));
@@ -2313,6 +2313,62 @@ let A; const setv = (id, v) => { A.ctx.document.getElementById(id).value = v; };
     check('"Then New Year" can be switched off', k('2026-12-31T12:00:00') === 'christmas');
     A.run("SSN=null");
     check('New Year decorations: fireworks, banner, flash, balloons countdown', ['function fwLoop', 'function nyBanner', 'function nyFlash', 'function nyCard', 'Countdown to New Year'].every(x => htmlSrc.includes(x)));
+  }
+  // ---------- Nov 27 (19:20): maintenance window reminders, stronger due-tile flash ----------
+  {
+    const T = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    const nowM = A.run('minOf(simNow())');
+    const ag = (name, a, b) => ({ name, role: 'Support', start: T(nowM + a), end: T(nowM + b), days: [1, 1, 1, 1, 1, 1, 1], status: 'available' });
+    A.run('window.__mwStf=STAFF;window.__mwMe=ME;window.__mwSu=SIM_USER;STAFF=' + JSON.stringify([ag('Mw Amy', -60, 400), ag('Mw Ben', -60, 400)]) + ';ensureMgrs(STAFF);STAFFLOADED=true');
+    A.run(`(()=>{CASES.length=0;const M=60000,n=Date.now(),mk=(id,o,s,x)=>{const c=mkCase(id,o,{account:'Acc '+id});if(s!=null)c.mw={s:n+s,e:null,by:'System',ts:n-36e5};Object.assign(c,x||{});CASES.push(c);return c};
+      mk('MW-1','Mw Amy',null);mk('MW-2','Mw Amy',-60*M);mk('MW-3','Mw Amy',8*M);mk('MW-4','Mw Amy',30*M);mk('MW-5','Mw Amy',-90*M,{closed:true,closedAt:n});mk('MW-6','Mw Amy',-90*M,{csr:true});
+      const u=mk('MW-7','Mw Ben',-3*864e5);u.mwUp=[{s:n+2*36e5,e:null,by:'Mw Ben',ts:n}];
+      ME={role:'agent',name:'Mw Amy'};SIM_USER='Mw Amy';applyMe();TAB='active';DUEF=false;MWF=false;RID++;render()})()`);
+    const stats = String(A.els['stats'].innerHTML);
+    check('Maintenance Window Reminder tile sits right after Active Cases (before Due Reminders)', stats.indexOf('Active Cases') < stats.indexOf('Maintenance Window Reminder') && stats.indexOf('Maintenance Window Reminder') < stats.indexOf('Due Reminders') && stats.includes('mwTile()'));
+    check('... it counts open cases whose maintenance window start passed (not closed, not CSR only, not an updated future window)', A.run("mwPastList().map(c=>c.id).join()") === 'MW-2', A.run("mwPastList().map(c=>c.id).join()"));
+    check('... and blinks / flashes red while there are any', /tile-mw mw-tile/.test(stats) && htmlSrc.includes('.due-tile::after,.mw-tile::after{') && htmlSrc.includes('animation:dueflash .35s infinite'));
+    check('the due reminder tile flashes harder (thicker red ring, glow, flashing inner border)', htmlSrc.includes('.due-tile,.mw-tile{animation:dueblink .7s infinite') && /@keyframes dueblink\{0%,100%\{box-shadow:0 0 0 5px #ff0033/.test(htmlSrc) && htmlSrc.includes("document.querySelector('#stats .tile-due')"));
+    A.run('mwTile()');
+    { const rows = String(A.els['rows'].innerHTML); check('clicking the tile lists the cases whose maintenance window start passed', A.run('MWF') === true && rows.includes('MW-2') && !rows.includes('MW-4') && !rows.includes('MW-1') && String(A.els['view-label'].innerHTML).includes('Maintenance window start passed')); }
+    A.run("setDash('active')");
+    check('... the other tiles clear that filter', A.run('MWF') === false);
+    const pop = () => ({ h: String(A.run("$('mwq-pop').innerHTML")), hid: A.run("$('mwq-pop').classList.contains('hidden')") });
+    A.run("openCaseModal('MW-1')"); let q1 = pop();
+    check('opening a case with no maintenance window start shows a pop-up to add it', !q1.hid && q1.h.includes('Add the maintenance window') && q1.h.includes('mwqGo()'), q1);
+    A.run("mwqClose();openCaseModal('MW-2')"); q1 = pop();
+    check('... one whose start already passed asks to update it', !q1.hid && q1.h.includes('Update the maintenance window') && q1.h.includes('already passed'), q1);
+    A.run("mwqClose();openCaseModal('MW-4')"); q1 = pop();
+    check('... none for a future window, a closed or a CSR-only case', q1.hid && (A.run("openCaseModal('MW-5');$('mwq-pop').classList.contains('hidden')") === true) && (A.run("openCaseModal('MW-6');$('mwq-pop').classList.contains('hidden')") === true));
+    check('... none when the case is reopened by itself after a reload', A.run("hide('case-modal');openId=null;openCaseModal('MW-1',true);$('mwq-pop').classList.contains('hidden')") === true);
+    A.run("hide('case-modal');openId=null;mwnRender()");
+    { const h = String(A.run("$('mwn-pop').innerHTML")); check('10 minutes before the start the owner gets a notice (like the transfer notice) with Acknowledge; a start that already passed stays until acknowledged', h.includes('Maintenance window reminder (2)') && h.includes("mwnAck('MW-3')") && h.includes("mwnAck('MW-2')") && h.includes('Acknowledge all (2)') && !h.includes('MW-4') && !h.includes('MW-7') && A.run("$('mwn-pop').classList.contains('hidden')") === false, h.slice(0, 300)); }
+    check('... not on another agent\'s screen', A.run("(()=>{ME={role:'agent',name:'Mw Ben'};SIM_USER='Mw Ben';const l=mwnList().length;ME={role:'agent',name:'Mw Amy'};SIM_USER='Mw Amy';return l})()") === 0);
+    A.run("mwnAck('MW-3')");
+    check('... Acknowledge is recorded in the case and leaves the notice', A.run("(()=>{const c=getCase('MW-3');return !!(c.mwAck&&c.mwAck.s===c.mw.s&&c.mwAck.by==='Mw Amy'&&c.log.some(l=>l.action==='Maintenance window reminder acknowledged'&&/starts in/.test(l.details)))})()") === true && String(A.run("$('mwn-pop').innerHTML")).includes('Maintenance window reminder (1)') && A.run("CX.includes('mwAck')") === true);
+    check('... and does not count as an update for productivity', A.run("wkHas(getCase('MW-3'),'Mw Amy')") === false && A.run("workersIn(getCase('MW-3'),0,Date.now()+1e7).has('Mw Amy')") === false);
+    A.run("mwnAck('MW-2')");
+    check('... Acknowledge all / the last one closes the notice', A.run("$('mwn-pop').classList.contains('hidden')") === true);
+    A.run("getCase('MW-3').mw.s=Date.now()+5*60000;RID++");
+    check('... a changed start time brings the notice back', A.run("mwnList().map(c=>c.id).join()") === 'MW-3');
+    // Nov 27 (20:30): the maintenance window pop-up comes back every time the case is opened until the window is updated
+    A.run("ME={role:'agent',name:'Mw Amy'};SIM_USER='Mw Amy';applyMe()");
+    check('the maintenance window pop-up shows every time the case is opened until the window is updated', [1, 2, 3].every(() => A.run("mwqClose();hide('case-modal');openId=null;openCaseModal('MW-2');!$('mwq-pop').classList.contains('hidden')") === true));
+    A.run("(()=>{const c=getCase('MW-2');c.mwUp=[{s:Date.now()+36e5,e:null,by:'Mw Amy',ts:Date.now()}];mwqClose();hide('case-modal');openId=null;openCaseModal('MW-2')})()");
+    check('... and stops once the maintenance window has a new future start', A.run("$('mwq-pop').classList.contains('hidden')") === true && A.run("mwPast(getCase('MW-2'))") === false);
+    A.run("hide('case-modal');openId=null");
+    // Nov 27 (20:30): a reminder is due / missed only when its actual ETA passes (not during the 5-minute warning)
+    A.run("(()=>{const c=mkCase('DU-1','Mw Amy',{});c.items.push({id:'d1',text:'Within warning',done:false,rem:{at:Date.now()+3*60000,text:'Within warning',by:'Mw Amy',setAt:Date.now()-36e5}},{id:'d2',text:'Past ETA',done:false,rem:{at:Date.now()-60000,text:'Past ETA',by:'Mw Amy',setAt:Date.now()-36e5}});CASES.push(c);TAB='active';DUEF=false;MWF=false;RID++;render()})()");
+    check('5 minutes before the ETA a reminder is not counted as due (tile / due list) — only once the ETA has passed', A.run("dueList(getCase('DU-1')).map(x=>x.it?x.it.id:(x.i||x.id||x.r.text)).length") === 1 && A.run("dueList(getCase('DU-1'))[0].r.text") === 'Past ETA' && A.run("pending(getCase('DU-1')).some(x=>x.r.text==='Within warning')") === true && A.run("ALERT_LEAD") > 0, A.run("JSON.stringify({d:dueList(getCase('DU-1')).map(x=>x.r.text),p:pending(getCase('DU-1')).map(x=>x.r.text),L:ALERT_LEAD})"));
+    check('... the Due Reminders tile counts only the reminder past its ETA', /Due Reminders<\/div><div[^>]*>1</.test(String(A.els['stats'].innerHTML)), String(A.els['stats'].innerHTML).slice(String(A.els['stats'].innerHTML).indexOf('Due Reminders'), String(A.els['stats'].innerHTML).indexOf('Due Reminders') + 160));
+    check('... and a missed due is counted only after the ETA', A.run("dueEvents(Date.now()-864e5,Date.now()+864e5).filter(e=>e.c.id==='DU-1').map(e=>e.text).join()") === 'Past ETA');
+    A.run("(()=>{const i=CASES.findIndex(c=>c.id==='DU-1');if(i>=0)CASES.splice(i,1);RID++})()");
+    // the Cases today change (transfers by hand marked m:1) leaves productivity / scorecard numbers unchanged
+    A.run("(()=>{ME={role:'manager',name:'Jeff Bote'};SIM_USER='Jeff Bote';applyMe();window.__pf=mkCase('PF-1','Mw Amy',{nw:1});CASES.push(__pf);const t0=Date.now()-36e5;__pf.ownh=[{n:'Mw Amy',at:t0},{n:'Mw Ben',at:t0+6e5,m:1}];__pf.owner='Mw Ben';logc(__pf,'Note','Mw Ben','worked',{ts:t0+9e5});const w=getCase('MW-4');w.ownh=[{n:'Mw Amy',at:t0},{n:'Mw Ben',at:t0+6e5}];w.owner='Mw Ben';logc(w,'Note','Mw Ben','worked',{ts:t0+9e5});logc(getCase('MW-2'),'Note','Mw Amy','worked',{ts:t0+9e5})})()");
+    const pf = () => A.run("(()=>{PD_CACHE.clear();CIX=null;const f=Date.now()-864e5,t=Date.now()+864e5;return JSON.stringify(perfCompute(f,t).rows||perfCompute(f,t))})()");
+    const before = pf(); A.run("CASES.forEach(c=>(c.ownh||[]).forEach(o=>{if(o)delete o.m}))"); const after = pf();
+    check('Cases today counting does not change the productivity numbers (scorecard and reports)', before === after && before.length > 20 && A.run("getCase('PF-1').ownh.length") >= 2, [before.slice(0, 200), after.slice(0, 200)]);
+    A.run("Object.keys(ST).filter(k=>/^(MW|PF)-/.test(k)).forEach(k=>{clearTimeout(ST[k]);ST[k]=0;PEND.delete(k)});mwqClose();STAFF=__mwStf;ME=__mwMe;SIM_USER=__mwSu;applyMe();MWF=false;CASES.length=0;RID++");
   }
   // ---------- only one screen deals the automatic hand-overs at a time ----------
   {
