@@ -118,8 +118,21 @@
   var SKEW = null; window.__petNow = function () { return Math.round(Date.now() + (SKEW || 0)); };
   function obRead() { try { return JSON.parse(localStorage.getItem(OUTBOX) || '{}') || {}; } catch (e) { return {}; } }
   function obWrite(o) { try { if (Object.keys(o).length) localStorage.setItem(OUTBOX, JSON.stringify(o)); else localStorage.removeItem(OUTBOX); } catch (e) {} }
-  function obAdd(p) { if (p.op === 'asset_put' || p.op === 'asset_del') return; var o = obRead(); o[p.ob] = { op: p.op, a: p.a, t: Date.now() }; obWrite(o); }
-  function obDel(p) { if (!p.ob) return; var o = obRead(); if (o[p.ob]) { delete o[p.ob]; obWrite(o); } }
+  /* Nov 27 (18:45): this page's unsaved changes are kept in memory and written to browser storage together (20 ms after a
+   * change is queued, a little later after a save is confirmed, and at once when the page is hidden or closed). Before,
+   * every save and every confirmation re-read and re-wrote the whole stored list: after many saves at once (hundreds of
+   * cases and their history lines) that used so much memory that the page could crash. Entries of other open pages are
+   * left as they are. */
+  var OBM = {}, obT = null, obDue = 0;
+  function obFlush() {
+    if (obT) { clearTimeout(obT); obT = null; } obDue = 0;
+    try { var o = obRead(), pre = CID + ':'; Object.keys(o).forEach(function (k) { if (k.indexOf(pre) === 0) delete o[k]; }); Object.keys(OBM).forEach(function (k) { o[k] = OBM[k]; }); obWrite(o); } catch (e) {}
+  }
+  function obSoon(ms) { var due = Date.now() + ms; if (obT && obDue <= due) return; if (obT) clearTimeout(obT); obDue = due; obT = setTimeout(obFlush, ms); }
+  window.__petObFlush = obFlush;
+  try { document.addEventListener('visibilitychange', function () { if (document.hidden) obFlush(); }); window.addEventListener('pagehide', obFlush); window.addEventListener('beforeunload', obFlush); } catch (e) {}
+  function obAdd(p) { if (p.op === 'asset_put' || p.op === 'asset_del') return; OBM[p.ob] = { op: p.op, a: p.a, t: Date.now() }; obSoon(20); }
+  function obDel(p) { if (!p.ob || !OBM[p.ob]) return; delete OBM[p.ob]; obSoon(250); }
   function rpc(op, a, timeout) {
     var loc = localRead(op, a);                                                  // (our own writes come back as a small change, see 'delta')
     if (loc !== undefined) return Promise.resolve(loc);
@@ -144,6 +157,7 @@
   var KEEP = { act: 1, att: 1 }, KEEP_MAX = 7 * 864e5;
   function keepIt(a) { return !!(a && KEEP[a.c]); }
   function replayOutbox(mine) {
+    obFlush();
     var live = {}; Object.keys(PEND).forEach(function (k) { if (PEND[k].ob) live[PEND[k].ob] = 1; });
     var o = obRead(), now = Date.now(), keys = Object.keys(o).filter(function (k) { return mine ? (!live[k] && keepIt(o[k] && o[k].a)) : k.indexOf(CID + ':') !== 0; });
     keys.sort(function (x, y) { return (o[x].t || 0) - (o[y].t || 0); });
